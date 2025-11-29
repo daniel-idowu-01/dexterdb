@@ -108,11 +108,36 @@ export class Seeder {
         }
 
         const fieldConfig = config.fields?.[field.name];
-        record[field.name] = await this.generateFieldValue(
+        
+        if (field.isForeignKey) {
+          let relationModelName = field.relationModel;
+          if (!relationModelName && field.name.endsWith("Id")) {
+            const baseName = field.name.replace(/Id$/, "");
+            relationModelName = baseName.charAt(0).toUpperCase() + baseName.slice(1);
+          }
+          
+          if (relationModelName) {
+            const fkValue = await this.resolveForeignKey(
+              { ...field, relationModel: relationModelName },
+              model.name
+            );
+            if (fkValue !== null && fkValue !== undefined) {
+              const relationName = field.name.replace(/Id$/, "");
+              record[relationName] = { connect: { id: fkValue } };
+            }
+          }
+          continue;
+        }
+        
+        const value = await this.generateFieldValue(
           field,
           fieldConfig,
           model.name
         );
+        
+        if (value !== undefined) {
+          record[field.name] = value;
+        }
       }
 
       data.push(record);
@@ -127,24 +152,35 @@ export class Seeder {
     fieldConfig: FieldConfig | undefined,
     modelName: string
   ): Promise<any> {
-    if (field.defaultValue !== undefined && !fieldConfig?.ignore) {
-      return field.defaultValue;
-    }
-
-    if (fieldConfig?.defaultValue !== undefined) {
-      return fieldConfig.defaultValue;
-    }
-
     if (fieldConfig?.ignore) {
       return undefined;
     }
 
-    if (field.isPrimaryKey) {
+    if (field.isPrimaryKey && field.type === "number") {
       return undefined;
     }
 
-    if (field.isForeignKey && field.relationModel) {
-      return await this.resolveForeignKey(field, modelName);
+    if (field.defaultValue !== undefined && !fieldConfig?.ignore) {
+      if (typeof field.defaultValue === "string" && 
+          (field.defaultValue.includes("now()") || 
+           field.defaultValue.includes("uuid()") ||
+           field.defaultValue.includes("autoincrement()"))) {
+        return undefined;
+      }
+      return field.defaultValue;
+    }
+    
+    if (field.type === "date" || field.type === "datetime") {
+      if (field.name.toLowerCase().includes("created") || 
+          field.name.toLowerCase().includes("updated")) {
+        if (field.defaultValue === undefined) {
+          
+        }
+      }
+    }
+
+    if (fieldConfig?.defaultValue !== undefined) {
+      return fieldConfig.defaultValue;
     }
 
     const type = fieldConfig?.type || field.type;
@@ -156,7 +192,8 @@ export class Seeder {
         return new NumberGenerator().generate(field.name, fieldConfig);
       case "date":
       case "datetime":
-        return new DateGenerator().generate(field.name, fieldConfig);
+        const dateValue = new DateGenerator().generate(field.name, fieldConfig);
+        return dateValue instanceof Date ? dateValue : new Date();
       case "boolean":
         return new BooleanGenerator().generate(field.name, fieldConfig);
       case "enum":
@@ -180,7 +217,9 @@ export class Seeder {
     const relatedData = this.generatedData.get(field.relationModel);
     if (relatedData && relatedData.length > 0) {
       const randomRecord = _.sample(relatedData);
-      return randomRecord?.[field.relationField || "id"];
+      if (randomRecord && randomRecord.id) {
+        return randomRecord.id;
+      }
     }
 
     try {
@@ -238,14 +277,25 @@ export class Seeder {
       await modelClient.deleteMany({});
     }
 
+    // Filter out undefined values from records
+    const cleanData = data.map((record) => {
+      const clean: any = {};
+      for (const [key, value] of Object.entries(record)) {
+        if (value !== undefined) {
+          clean[key] = value;
+        }
+      }
+      return clean;
+    });
+
     if (this.config.global?.randomize) {
-      for (const record of data) {
+      for (const record of cleanData) {
         await modelClient.create({ data: record });
       }
-      return { count: data.length };
+      return { count: cleanData.length };
     } else {
       const results = await Promise.all(
-        data.map((record) => modelClient.create({ data: record }))
+        cleanData.map((record) => modelClient.create({ data: record }))
       );
       return { count: results.length };
     }
