@@ -72,7 +72,9 @@ export class Seeder {
 
       const result = await this.insertData(modelName, data);
 
-      this.generatedData.set(modelName, data);
+      // Fetch the inserted records with their database IDs for foreign key resolution
+      const insertedRecords = await this.fetchInsertedRecords(modelName, result.count);
+      this.generatedData.set(modelName, insertedRecords);
 
       Logger.success(`Successfully seeded ${result.count} ${modelName} records`);
       return {
@@ -124,6 +126,11 @@ export class Seeder {
             if (fkValue !== null && fkValue !== undefined) {
               const relationName = field.name.replace(/Id$/, "");
               record[relationName] = { connect: { id: fkValue } };
+            } else {
+              // If no FK value found, try to fetch from database
+              Logger.warning(
+                `No related records found for ${relationModelName}. Make sure to seed ${relationModelName} first.`
+              );
             }
           }
           continue;
@@ -214,9 +221,11 @@ export class Seeder {
     if (!field.relationModel) {
       return null;
     }
+    // Check if we have generated data for the related model
     const relatedData = this.generatedData.get(field.relationModel);
     if (relatedData && relatedData.length > 0) {
       const randomRecord = _.sample(relatedData);
+      // The records should have database IDs after insertion
       if (randomRecord && randomRecord.id) {
         return randomRecord.id;
       }
@@ -277,10 +286,19 @@ export class Seeder {
       await modelClient.deleteMany({});
     }
 
-    // Filter out undefined values from records
+    // Filter out undefined values and foreign key fields from records
+    // Foreign keys should use Prisma relation syntax, not direct field assignment
+    const model = this.models.find((m) => m.name === modelName);
     const cleanData = data.map((record) => {
       const clean: any = {};
       for (const [key, value] of Object.entries(record)) {
+        // Skip foreign key fields - they should use relation syntax
+        if (key.endsWith("Id")) {
+          const field = model?.fields.find((f) => f.name === key);
+          if (field?.isForeignKey) {
+            continue; // Skip foreign key field - relation should be set instead
+          }
+        }
         if (value !== undefined) {
           clean[key] = value;
         }
@@ -298,6 +316,27 @@ export class Seeder {
         cleanData.map((record) => modelClient.create({ data: record }))
       );
       return { count: results.length };
+    }
+  }
+
+  // Fetch inserted records with their database IDs
+  private async fetchInsertedRecords(modelName: string, count: number): Promise<any[]> {
+    const camelCaseName = modelName.charAt(0).toLowerCase() + modelName.slice(1);
+    const modelClient = (this.prisma as any)[camelCaseName];
+
+    if (!modelClient) {
+      return [];
+    }
+
+    try {
+      const records = await modelClient.findMany({
+        take: count,
+        orderBy: { id: "desc" }, // Get the most recently inserted
+      });
+      return records;
+    } catch (error) {
+      Logger.debug(`Could not fetch inserted records for ${modelName}: ${error}`);
+      return [];
     }
   }
 

@@ -1,0 +1,44 @@
+# Source files
+src/
+tests/
+*.ts
+!*.d.ts
+
+# Development files
+tsconfig.json
+jest.config.js
+.eslintrc.json
+.prettierrc.json
+nodemon.json
+
+# Documentation
+README.md
+SETUP.md
+TESTING.md
+QUICK_START.md
+*.md
+
+# Test files
+test-seeder.ts
+*.test.ts
+*.spec.ts
+
+# Development dependencies
+node_modules/
+.git/
+.gitignore
+
+# Docker
+docker-compose.yml
+
+# Prisma
+prisma/
+.env
+.env.example
+
+# Config examples
+seeder.config.example.json
+
+# Build artifacts (keep dist/)
+*.tsbuildinfo
+

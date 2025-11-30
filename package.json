@@ -38,8 +38,16 @@
     "prisma",
     "postgresql"
   ],
-  "author": "",
+  "author": "Daniel Idowu",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/daniel-idowu-01/dexter-db.git"
+  },
+  "bugs": {
+    "url": "https://github.com/daniel-idowu-01/dexter-db/issues"
+  },
+  "homepage": "https://github.com/daniel-idowu-01/dexter-db#readme",
   "dependencies": {
     "@faker-js/faker": "^8.3.1",
     "@prisma/client": "^5.22.0",

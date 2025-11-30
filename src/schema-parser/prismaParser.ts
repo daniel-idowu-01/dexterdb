@@ -114,7 +114,10 @@ export class PrismaParser {
       const cleanType = fieldType.replace("?", "");
       const isUnique = attributes.includes("@unique");
       const isPrimaryKey = attributes.includes("@id");
-      const isForeignKey = attributes.includes("@relation") && attributes.includes("fields:");
+      // Check if this field is a foreign key by looking for @relation with fields: [thisField]
+      // Foreign keys are fields referenced in @relation(fields: [fieldName], ...)
+      const isForeignKey = modelBody.includes(`@relation`) && 
+                          modelBody.includes(`fields: [${fieldName}]`);
       const isUpdatedAt = attributes.includes("@updatedAt");
       
       let defaultValue: any = undefined;
@@ -146,6 +149,24 @@ export class PrismaParser {
 
       let relationModel: string | undefined = undefined;
       let relationField: string | undefined = undefined;
+      
+      // If it's a foreign key, extract the relation model from the relation line
+      // Pattern: relationFieldName ModelName @relation(fields: [fieldName], references: [id])
+      if (isForeignKey) {
+        const relationLineMatch = modelBody.match(
+          new RegExp(`(\\w+)\\s+(\\w+)\\s+@relation\\([^)]*fields:\\s*\\[${fieldName}\\][^)]*\\)`, 'g')
+        );
+        if (relationLineMatch && relationLineMatch.length > 0) {
+          const parts = relationLineMatch[0].match(/(\w+)\s+(\w+)/);
+          if (parts && parts[2]) {
+            const potentialModel = parts[2];
+            // Verify it's not a Prisma type
+            if (!["String", "Int", "Float", "Boolean", "DateTime", "Json", "Bytes", "BigInt", "Decimal"].includes(potentialModel)) {
+              relationModel = potentialModel;
+            }
+          }
+        }
+      }
       const relationMatch = attributes.match(/@relation\([^)]*fields:\s*\[([^\]]+)\][^)]*references:\s*\[([^\]]+)\][^)]*\)/);
       if (relationMatch) {
         relationField = relationMatch[2].trim();
