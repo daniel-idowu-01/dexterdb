@@ -5,7 +5,6 @@ import { SeederConfig } from "../types";
 import { Logger } from "../utils/logger";
 
 export class ConfigLoader {
-  // Load configuration from file (JSON or YAML)
   static load(configPath?: string): SeederConfig {
     const defaultPath = join(process.cwd(), "seeder.config.json");
     const path = configPath || process.env.SEEDER_CONFIG_PATH || defaultPath;

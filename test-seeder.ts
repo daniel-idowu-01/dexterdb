@@ -1,58 +1,38 @@
-import { Seeder } from "./src/seeder";
-import { config } from "dotenv";
+import { Seeder } from './src/seeder';
+import { config } from 'dotenv';
+import { join } from 'path';
 
 config();
 
-async function testSeeder() {
-  if (!process.env.DATABASE_URL) {
-    console.error("❌ DATABASE_URL not found in environment variables");
-    console.log("Please create a .env file with DATABASE_URL");
-    process.exit(1);
-  }
+async function test() {
+  console.log('Testing MongoDB Seeder with Mongoose...\n');
 
   const seeder = new Seeder({
-    dbUrl: process.env.DATABASE_URL,
+    dbUrl: process.env.DATABASE_URL!,
+    schemaPath: join(__dirname, 'src', 'models'),
     verbose: true,
   });
 
   try {
-    console.log("🚀 Initializing seeder...");
     await seeder.initialize();
-
-    console.log("\n📊 Available models:");
+    
+    console.log('\n Available models:');
     const models = seeder.getModels();
-    models.forEach((model) => {
-      console.log(`  - ${model.name} (${model.fields.length} fields)`);
-    });
+    models.forEach((m) => console.log(`  - ${m.name} (${m.fields.length} fields)`));
 
-    console.log("\n🌱 Seeding User model (10 records)...");
-    const userResult = await seeder.seed("User", 10);
-    if (userResult.success) {
-      console.log(`✅ Successfully seeded ${userResult.count} users`);
-    } else {
-      console.error(`❌ Failed: ${userResult.error}`);
-    }
+    console.log('\n Seeding User (20 records)...');
+    await seeder.seed('User', 20);
 
-    console.log("\n🌱 Seeding Post model (10 records)...");
-    const postResult = await seeder.seed("Post", 10);
-    if (postResult.success) {
-      console.log(`✅ Successfully seeded ${postResult.count} posts`);
-    } else {
-      console.error(`❌ Failed: ${postResult.error}`);
-    }
+    console.log('\n Seeding Post (50 records)...');
+    await seeder.seed('Post', 50);
 
-    console.log("\n✅ Seeding test completed!");
+    console.log('\n All done!');
   } catch (error: any) {
-    console.error("❌ Error:", error.message);
-    if (error.stack) {
-      console.error(error.stack);
-    }
+    console.error('Error:', error.message);
     process.exit(1);
   } finally {
     await seeder.disconnect();
-    console.log("\n🔌 Disconnected from database");
   }
 }
 
-testSeeder();
-
+test();

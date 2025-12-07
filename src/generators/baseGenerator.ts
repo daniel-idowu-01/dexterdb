@@ -149,3 +149,14 @@ export class EnumGenerator extends BaseGenerator {
   }
 }
 
+export class ObjectIdGenerator extends BaseGenerator {
+  generate(fieldName: string, config?: FieldConfig): string {
+    const timestamp = Math.floor(Date.now() / 1000)
+      .toString(16)
+      .padStart(8, "0");
+    const randomHex = faker.string.hexadecimal({ length: 10, prefix: "", casing: "lower" });
+    const counter = faker.string.hexadecimal({ length: 6, prefix: "", casing: "lower" });
+
+    return `${timestamp}${randomHex}${counter}`;
+  }
+}

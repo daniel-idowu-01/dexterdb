@@ -1,10 +1,11 @@
-import { PrismaParser } from "./schema-parser/prismaParser";
+import { MongooseParser } from "./schema-parser/mongooseParser";
 import {
   StringGenerator,
   NumberGenerator,
   DateGenerator,
   BooleanGenerator,
   EnumGenerator,
+  ObjectIdGenerator,
 } from "./generators";
 import { ConfigLoader } from "./config/config";
 import { Logger } from "./utils/logger";
@@ -16,40 +17,36 @@ import {
   SeedResult,
   ModelConfig,
   FieldConfig,
-  RelationConfig,
 } from "./types";
 import _ from "lodash";
+import mongoose from "mongoose";
 
 export class Seeder {
   private options: SeederOptions;
-  private prisma: any;
-  private parser: PrismaParser;
+  private parser: MongooseParser;
   private config: SeederConfig;
   private models: SchemaModel[] = [];
   private generatedData: Map<string, any[]> = new Map();
+  private mongooseModels: Map<string, any> = new Map();
 
   constructor(options: SeederOptions) {
     this.options = options;
-    if (options.dbUrl) {
-      process.env.DATABASE_URL = options.dbUrl;
-    }
-    
-    // Get PrismaClient from parser which handles the import safely
-    this.parser = new PrismaParser(options.schemaPath);
-    this.prisma = this.parser.getPrismaClient();
-    this.config = ConfigLoader.mergeWithDefaults(
-      ConfigLoader.load(options.configPath)
-    );
+
+    this.parser = new MongooseParser(options.schemaPath, options.dbUrl);
+    this.config = ConfigLoader.mergeWithDefaults(ConfigLoader.load(options.configPath));
   }
 
-  // Initialize seeder by parsing schema
   async initialize(): Promise<void> {
     Logger.step("Initializing seeder...");
+
+    await this.parser.connect();
+
     this.models = await this.parser.introspectDatabase();
+    this.mongooseModels = this.parser.getModels();
+
     Logger.success(`Found ${this.models.length} models in schema`);
   }
 
-  // Seed a specific model with data
   async seed(
     modelName: string,
     count: number = 10,
@@ -58,22 +55,31 @@ export class Seeder {
     try {
       Logger.step(`Seeding ${modelName} with ${count} records...`);
 
-      const model = this.models.find((m) => m.name === modelName);
+      const model = this.models.find(m => m.name === modelName);
       if (!model) {
         throw new Error(`Model ${modelName} not found in schema`);
       }
 
-      const modelConfig = {
+      const mongooseModel = this.mongooseModels.get(modelName);
+      if (!mongooseModel) {
+        throw new Error(`Mongoose model ${modelName} not loaded`);
+      }
+
+      const modelConfig: any = {
         ...ConfigLoader.getModelConfig(this.config, modelName),
         ...options,
       };
 
+      if (modelConfig.reset || this.config.global?.reset) {
+        Logger.warning(`Resetting ${modelName} collection...`);
+        await mongooseModel.deleteMany({});
+      }
+
       const data = await this.generateModelData(model, count, modelConfig);
 
-      const result = await this.insertData(modelName, data);
+      const result = await this.insertData(modelName, mongooseModel, data);
 
-      // Fetch the inserted records with their database IDs for foreign key resolution
-      const insertedRecords = await this.fetchInsertedRecords(modelName, result.count);
+      const insertedRecords = await this.fetchInsertedRecords(mongooseModel, result.count);
       this.generatedData.set(modelName, insertedRecords);
 
       Logger.success(`Successfully seeded ${result.count} ${modelName} records`);
@@ -93,7 +99,6 @@ export class Seeder {
     }
   }
 
-  // Generate data for a model
   private async generateModelData(
     model: SchemaModel,
     count: number,
@@ -110,38 +115,40 @@ export class Seeder {
         }
 
         const fieldConfig = config.fields?.[field.name];
-        
-        if (field.isForeignKey) {
-          let relationModelName = field.relationModel;
-          if (!relationModelName && field.name.endsWith("Id")) {
-            const baseName = field.name.replace(/Id$/, "");
-            relationModelName = baseName.charAt(0).toUpperCase() + baseName.slice(1);
-          }
-          
-          if (relationModelName) {
-            const fkValue = await this.resolveForeignKey(
-              { ...field, relationModel: relationModelName },
-              model.name
-            );
-            if (fkValue !== null && fkValue !== undefined) {
-              const relationName = field.name.replace(/Id$/, "");
-              record[relationName] = { connect: { id: fkValue } };
+
+        if (field.isForeignKey && field.relationModel) {
+          const refValue = await this.resolveReference(field, model.name);
+
+          if (refValue !== null && refValue !== undefined) {
+            // Check if it's a many-to-many or one-to-many with array
+            const relation = model.relations.find(r => r.name === field.name);
+
+            if (relation && relation.type === "manyToMany") {
+              const relationConfig = config.relations?.[field.name];
+              const min = relationConfig?.min ?? 0;
+              const max = relationConfig?.max ?? 3;
+              const refCount = _.random(min, max);
+
+              const refs = [];
+              for (let j = 0; j < refCount; j++) {
+                const ref = await this.resolveReference(field, model.name);
+                if (ref) refs.push(ref);
+              }
+              record[field.name] = refs;
             } else {
-              // If no FK value found, try to fetch from database
-              Logger.warning(
-                `No related records found for ${relationModelName}. Make sure to seed ${relationModelName} first.`
-              );
+              // Single reference
+              record[field.name] = refValue;
             }
+          } else {
+            Logger.warning(
+              `No related records found for ${field.relationModel}. Make sure to seed ${field.relationModel} first.`
+            );
           }
           continue;
         }
-        
-        const value = await this.generateFieldValue(
-          field,
-          fieldConfig,
-          model.name
-        );
-        
+
+        const value = await this.generateFieldValue(field, fieldConfig, model.name);
+
         if (value !== undefined) {
           record[field.name] = value;
         }
@@ -153,7 +160,6 @@ export class Seeder {
     return data;
   }
 
-  //  Generate value for a specific field
   private async generateFieldValue(
     field: SchemaField,
     fieldConfig: FieldConfig | undefined,
@@ -163,27 +169,15 @@ export class Seeder {
       return undefined;
     }
 
-    if (field.isPrimaryKey && field.type === "number") {
+    if (field.name === "id" || field.name === "_id") {
       return undefined;
     }
 
     if (field.defaultValue !== undefined && !fieldConfig?.ignore) {
-      if (typeof field.defaultValue === "string" && 
-          (field.defaultValue.includes("now()") || 
-           field.defaultValue.includes("uuid()") ||
-           field.defaultValue.includes("autoincrement()"))) {
+      if (typeof field.defaultValue === "function") {
         return undefined;
       }
       return field.defaultValue;
-    }
-    
-    if (field.type === "date" || field.type === "datetime") {
-      if (field.name.toLowerCase().includes("created") || 
-          field.name.toLowerCase().includes("updated")) {
-        if (field.defaultValue === undefined) {
-          
-        }
-      }
     }
 
     if (fieldConfig?.defaultValue !== undefined) {
@@ -195,71 +189,80 @@ export class Seeder {
     switch (type) {
       case "string":
         return new StringGenerator().generate(field.name, fieldConfig);
+
       case "number":
         return new NumberGenerator().generate(field.name, fieldConfig);
+
       case "date":
       case "datetime":
         const dateValue = new DateGenerator().generate(field.name, fieldConfig);
         return dateValue instanceof Date ? dateValue : new Date();
+
       case "boolean":
         return new BooleanGenerator().generate(field.name, fieldConfig);
+
       case "enum":
         return new EnumGenerator().generate(field.name, {
           ...fieldConfig,
           values: field.enumValues || fieldConfig?.values,
         });
+
+      case "objectid":
+        return new mongoose.Types.ObjectId();
+
+      case "array":
+        const arrayLength = _.random(fieldConfig?.min ?? 0, fieldConfig?.max ?? 5);
+        const arrayValues = [];
+        for (let i = 0; i < arrayLength; i++) {
+          if (fieldConfig?.values && fieldConfig.values.length > 0) {
+            arrayValues.push(_.sample(fieldConfig.values));
+          } else {
+            arrayValues.push(new StringGenerator().generate(field.name, fieldConfig));
+          }
+        }
+        return arrayValues;
+
+      case "json":
+        return fieldConfig?.defaultValue || {};
+
       default:
         return new StringGenerator().generate(field.name, fieldConfig);
     }
   }
 
-  // Resolve foreign key value from related model
-  private async resolveForeignKey(
-    field: SchemaField,
-    currentModel: string
-  ): Promise<any> {
+  private async resolveReference(field: SchemaField, currentModel: string): Promise<any> {
     if (!field.relationModel) {
       return null;
     }
-    // Check if we have generated data for the related model
+
     const relatedData = this.generatedData.get(field.relationModel);
     if (relatedData && relatedData.length > 0) {
       const randomRecord = _.sample(relatedData);
-      // The records should have database IDs after insertion
-      if (randomRecord && randomRecord.id) {
-        return randomRecord.id;
+      if (randomRecord && randomRecord._id) {
+        return randomRecord._id;
       }
     }
 
     try {
-      const camelCaseModelName =
-        field.relationModel.charAt(0).toLowerCase() + field.relationModel.slice(1);
-      const modelClient = (this.prisma as any)[camelCaseModelName];
-      
-      if (modelClient) {
-        const records = await modelClient.findMany({
-          take: 100,
-          select: { [field.relationField || "id"]: true },
-        });
+      const relatedModel = this.mongooseModels.get(field.relationModel);
+
+      if (relatedModel) {
+        const records = await relatedModel.find().limit(100).select("_id").lean();
 
         if (records.length > 0) {
           const randomRecord = _.sample(records);
-          return randomRecord?.[field.relationField || "id"];
+          return randomRecord?._id;
         }
       }
     } catch (error) {
-      Logger.debug(
-        `Could not fetch related records for ${field.relationModel}: ${error}`
-      );
+      Logger.debug(`Could not fetch related records for ${field.relationModel}: ${error}`);
     }
 
     return null;
   }
 
-  // Check if field should be skipped
   private shouldSkipField(field: SchemaField, config: ModelConfig): boolean {
-    // Skip auto-generated primary keys
-    if (field.isPrimaryKey && field.type === "number") {
+    if (field.name === "id" || field.name === "_id") {
       return true;
     }
 
@@ -270,35 +273,14 @@ export class Seeder {
     return false;
   }
 
-  // Insert generated data into database
-  private async insertData(modelName: string, data: any[]): Promise<{ count: number }> {
-    const camelCaseName = modelName.charAt(0).toLowerCase() + modelName.slice(1);
-    const modelClient = (this.prisma as any)[camelCaseName];
-
-    if (!modelClient) {
-      throw new Error(
-        `Prisma client not found for model ${modelName} (tried: ${camelCaseName}). Make sure the model exists in your schema and Prisma client is generated.`
-      );
-    }
-
-    if (this.config.global?.reset) {
-      Logger.warning(`Resetting ${modelName} table...`);
-      await modelClient.deleteMany({});
-    }
-
-    // Filter out undefined values and foreign key fields from records
-    // Foreign keys should use Prisma relation syntax, not direct field assignment
-    const model = this.models.find((m) => m.name === modelName);
-    const cleanData = data.map((record) => {
+  private async insertData(
+    modelName: string,
+    mongooseModel: any,
+    data: any[]
+  ): Promise<{ count: number }> {
+    const cleanData = data.map(record => {
       const clean: any = {};
       for (const [key, value] of Object.entries(record)) {
-        // Skip foreign key fields - they should use relation syntax
-        if (key.endsWith("Id")) {
-          const field = model?.fields.find((f) => f.name === key);
-          if (field?.isForeignKey) {
-            continue; // Skip foreign key field - relation should be set instead
-          }
-        }
         if (value !== undefined) {
           clean[key] = value;
         }
@@ -307,43 +289,32 @@ export class Seeder {
     });
 
     if (this.config.global?.randomize) {
-      for (const record of cleanData) {
-        await modelClient.create({ data: record });
+      const shuffled = _.shuffle(cleanData);
+      const results = [];
+      for (const record of shuffled) {
+        const doc = new mongooseModel(record);
+        const saved = await doc.save();
+        results.push(saved);
       }
-      return { count: cleanData.length };
+      return { count: results.length };
     } else {
-      const results = await Promise.all(
-        cleanData.map((record) => modelClient.create({ data: record }))
-      );
+      const results = await mongooseModel.insertMany(cleanData);
       return { count: results.length };
     }
   }
 
-  // Fetch inserted records with their database IDs
-  private async fetchInsertedRecords(modelName: string, count: number): Promise<any[]> {
-    const camelCaseName = modelName.charAt(0).toLowerCase() + modelName.slice(1);
-    const modelClient = (this.prisma as any)[camelCaseName];
-
-    if (!modelClient) {
-      return [];
-    }
-
+  private async fetchInsertedRecords(mongooseModel: any, count: number): Promise<any[]> {
     try {
-      const records = await modelClient.findMany({
-        take: count,
-        orderBy: { id: "desc" }, // Get the most recently inserted
-      });
+      const records = await mongooseModel.find().sort({ _id: -1 }).limit(count).lean();
       return records;
     } catch (error) {
-      Logger.debug(`Could not fetch inserted records for ${modelName}: ${error}`);
+      Logger.debug(`Could not fetch inserted records: ${error}`);
       return [];
     }
   }
 
-  // Seed all models in schema
   async seedAll(): Promise<SeedResult[]> {
     const results: SeedResult[] = [];
-
     const sortedModels = this.sortModelsByDependencies();
 
     for (const model of sortedModels) {
@@ -357,7 +328,6 @@ export class Seeder {
     return results;
   }
 
-  // Sort models by their dependencies (simple topological sort)
   private sortModelsByDependencies(): SchemaModel[] {
     const sorted: SchemaModel[] = [];
     const visited = new Set<string>();
@@ -365,7 +335,7 @@ export class Seeder {
 
     const visit = (model: SchemaModel) => {
       if (visiting.has(model.name)) {
-        return; // Circular dependency, skip
+        return;
       }
       if (visited.has(model.name)) {
         return;
@@ -375,7 +345,7 @@ export class Seeder {
 
       for (const field of model.fields) {
         if (field.isForeignKey && field.relationModel) {
-          const depModel = this.models.find((m) => m.name === field.relationModel);
+          const depModel = this.models.find(m => m.name === field.relationModel);
           if (depModel) {
             visit(depModel);
           }
@@ -401,8 +371,6 @@ export class Seeder {
   }
 
   async disconnect(): Promise<void> {
-    await this.prisma.$disconnect();
     await this.parser.disconnect();
   }
 }
-

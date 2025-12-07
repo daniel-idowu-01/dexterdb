@@ -1,14 +1,13 @@
 {
   "name": "dexter",
-  "version": "1.0.0",
-  "description": "Dexter DB - Generate realistic test data for databases with relational dependencies",
+  "version": "2.0.0",
+  "description": "Dexter - Generate realistic test data for MongoDB databases using Mongoose",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
   "bin": {
     "dexter": "./dist/cli.js"
   },
   "scripts": {
-    "prebuild": "prisma generate || echo 'Warning: Prisma client generation skipped. Run npm run prisma:generate manually if needed.'",
     "build": "tsc",
     "dev": "ts-node cli.ts",
     "dev:watch": "nodemon --watch src --watch cli.ts --exec ts-node cli.ts",
@@ -19,15 +18,11 @@
     "lint:fix": "eslint src cli.ts --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\" \"cli.ts\" \"tests/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"cli.ts\" \"tests/**/*.ts\"",
-    "prisma:generate": "prisma generate",
-    "prisma:studio": "prisma studio",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:push": "prisma db push",
-    "prisma:reset": "prisma migrate reset",
     "test:seeder": "ts-node test-seeder.ts",
     "db:up": "docker-compose up -d",
     "db:down": "docker-compose down",
-    "db:logs": "docker-compose logs -f postgres"
+    "db:logs": "docker-compose logs -f mongodb",
+    "db:reset": "docker-compose down -v && docker-compose up -d"
   },
   "keywords": [
     "database",
@@ -35,8 +30,10 @@
     "seeder",
     "faker",
     "test-data",
-    "prisma",
-    "postgresql"
+    "mongoose",
+    "mongodb",
+    "odm",
+    "data-generation"
   ],
   "author": "Daniel Idowu",
   "license": "MIT",
@@ -50,7 +47,7 @@
   "homepage": "https://github.com/daniel-idowu-01/dexter#readme",
   "dependencies": {
     "@faker-js/faker": "^8.3.1",
-    "@prisma/client": "^5.22.0",
+    "mongoose": "^8.0.0",
     "chalk": "^4.1.2",
     "commander": "^12.1.0",
     "dotenv": "^16.4.5",

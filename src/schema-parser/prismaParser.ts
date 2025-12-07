@@ -3,10 +3,8 @@ import { join } from "path";
 import { SchemaModel, SchemaField, SchemaRelation } from "../types";
 import { Logger } from "../utils/logger";
 
-// Dynamic import of PrismaClient to handle cases where it hasn't been generated yet
 function getPrismaClient(): any {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { PrismaClient } = require("@prisma/client");
     return PrismaClient;
   } catch (error) {
@@ -39,14 +37,9 @@ export class PrismaParser {
     }
   }
 
-  // Get database schema information using Prisma introspection
   async introspectDatabase(): Promise<SchemaModel[]> {
     try {
       const models = await this.parseSchema();
-      
-      // Enhance with actual database metadata if needed
-      // This is a simplified version - in production, you might want to query
-      // the database directly for more accurate type information
       
       return models;
     } catch (error) {
@@ -79,18 +72,14 @@ export class PrismaParser {
 
   private extractFields(modelBody: string, modelName: string, allModels: SchemaModel[] = []): SchemaField[] {
     const fields: SchemaField[] = [];
-    // Match field definitions: fieldName Type? @attributes
-    // This regex handles: field name, type (with optional ?), and attributes
     const lines = modelBody.split("\n");
     
     for (const line of lines) {
       const trimmed = line.trim();
-      // Skip empty lines, comments, and relation fields (they end with [] or are model types)
       if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("}")) {
         continue;
       }
 
-      // Match: fieldName Type? @attributes
       const fieldMatch = trimmed.match(/^(\w+)\s+([A-Z][a-zA-Z0-9]*\??)(\s+.*)?$/);
       if (!fieldMatch) {
         continue;
@@ -100,45 +89,37 @@ export class PrismaParser {
       const fieldType = fieldMatch[2];
       const attributes = fieldMatch[3] || "";
 
-      // Skip if it's a relation field (type is a model name, not a Prisma type)
-      // Relation fields are typically: fieldName ModelName[] or fieldName ModelName?
       const isRelationField = 
         !["String", "Int", "Float", "Boolean", "DateTime", "Json", "Bytes", "BigInt", "Decimal"].includes(fieldType.replace("?", "")) &&
         (attributes.includes("@relation") || trimmed.includes("[]") || fieldType.endsWith("?"));
       
       if (isRelationField && !attributes.includes("fields:")) {
-        continue; // Skip relation fields, but keep foreign key fields
+        continue;
       }
 
       const isRequired = !fieldType.includes("?");
       const cleanType = fieldType.replace("?", "");
       const isUnique = attributes.includes("@unique");
       const isPrimaryKey = attributes.includes("@id");
-      // Check if this field is a foreign key by looking for @relation with fields: [thisField]
-      // Foreign keys are fields referenced in @relation(fields: [fieldName], ...)
       const isForeignKey = modelBody.includes(`@relation`) && 
                           modelBody.includes(`fields: [${fieldName}]`);
       const isUpdatedAt = attributes.includes("@updatedAt");
       
       let defaultValue: any = undefined;
-      // Match @default(...) - handle nested parentheses
       const defaultMatch = attributes.match(/@default\(([^()]+(?:\([^()]*\)[^()]*)*)\)/);
       if (defaultMatch) {
         const defaultValueStr = defaultMatch[1].trim();
-        // Check if it's a function call that should be skipped
         if (defaultValueStr === "now()" || 
             defaultValueStr === "uuid()" || 
             defaultValueStr === "autoincrement()" ||
             defaultValueStr.startsWith("autoincrement")) {
-          defaultValue = undefined; // Let Prisma handle it
+          defaultValue = undefined;
         } else {
           defaultValue = this.parseDefaultValue(defaultValueStr);
         }
       }
       
-      // Mark @updatedAt fields to skip them (Prisma handles these automatically)
       if (isUpdatedAt) {
-        // Skip this field - it's auto-managed by Prisma
         continue;
       }
 
@@ -150,8 +131,6 @@ export class PrismaParser {
       let relationModel: string | undefined = undefined;
       let relationField: string | undefined = undefined;
       
-      // If it's a foreign key, extract the relation model from the relation line
-      // Pattern: relationFieldName ModelName @relation(fields: [fieldName], references: [id])
       if (isForeignKey) {
         const relationLineMatch = modelBody.match(
           new RegExp(`(\\w+)\\s+(\\w+)\\s+@relation\\([^)]*fields:\\s*\\[${fieldName}\\][^)]*\\)`, 'g')
@@ -160,7 +139,6 @@ export class PrismaParser {
           const parts = relationLineMatch[0].match(/(\w+)\s+(\w+)/);
           if (parts && parts[2]) {
             const potentialModel = parts[2];
-            // Verify it's not a Prisma type
             if (!["String", "Int", "Float", "Boolean", "DateTime", "Json", "Bytes", "BigInt", "Decimal"].includes(potentialModel)) {
               relationModel = potentialModel;
             }
@@ -170,14 +148,11 @@ export class PrismaParser {
       const relationMatch = attributes.match(/@relation\([^)]*fields:\s*\[([^\]]+)\][^)]*references:\s*\[([^\]]+)\][^)]*\)/);
       if (relationMatch) {
         relationField = relationMatch[2].trim();
-        // Find relation model by looking for the relation field in modelBody
-        // Pattern: relationFieldName ModelName @relation(fields: [fieldName], ...)
         const relationLineMatch = modelBody.match(new RegExp(`(\\w+)\\s+(\\w+)\\s+@relation\\([^)]*fields:\\s*\\[${fieldName}\\][^)]*\\)`, 'g'));
         if (relationLineMatch) {
           const parts = relationLineMatch[0].match(/(\w+)\s+(\w+)/);
           if (parts && parts[2]) {
             const potentialModel = parts[2];
-            // Verify it's not a Prisma type
             if (!["String", "Int", "Float", "Boolean", "DateTime", "Json", "Bytes", "BigInt", "Decimal"].includes(potentialModel)) {
               relationModel = potentialModel;
             }
@@ -239,7 +214,6 @@ export class PrismaParser {
     return relations;
   }
 
-  // Normalize Prisma types to generic types
   private normalizeType(prismaType: string): string {
     const cleanType = prismaType.replace("?", "").replace("[]", "").trim();
 

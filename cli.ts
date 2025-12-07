@@ -8,12 +8,10 @@ import { Logger } from "./src/utils/logger";
 import { readFileSync } from "fs";
 import { join } from "path";
 
-// Load environment variables
 config();
 
 const program = new Command();
 
-// Get version from package.json
 let version = "1.0.0";
 try {
   const packageJson = JSON.parse(
@@ -21,7 +19,6 @@ try {
   );
   version = packageJson.version;
 } catch {
-  // Use default version
 }
 
 program
@@ -130,7 +127,6 @@ program
 
       await seeder.initialize();
 
-      // Get models from seeder
       const models = seeder.getModels();
 
       spinner.succeed(`Found ${models.length} models`);
@@ -147,6 +143,5 @@ program
     }
   });
 
-// Parse command line arguments
 program.parse();
 
