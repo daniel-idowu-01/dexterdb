@@ -7,7 +7,7 @@
 - [x] All dependencies listed in package.json
 - [x] Main entry point configured (`dist/index.js`)
 - [x] Type definitions included (`dist/index.d.ts`)
-- [x] CLI binary configured (`bin.dexter`)
+- [x] CLI binary configured (`bin.dexterdb`)
 - [x] .npmignore file created
 - [x] README.md with usage instructions
 - [x] License (MIT) specified
@@ -37,7 +37,7 @@
 4. **Test locally (optional):**
    ```bash
    npm pack
-   npm install -g ./dexter-1.0.0.tgz
+   npm install -g ./dexterdb-1.0.0.tgz
    ```
 
 5. **Login to npm:**
@@ -59,8 +59,8 @@
 
 1. **Verify installation:**
    ```bash
-   npm install -g dexter
-   dexter --version
+   npm install -g dexterdb
+   dexterdb --version
    ```
 
 2. **Update version for next release:**
@@ -80,7 +80,7 @@ The published package will include:
 
 ## Notes
 
-- The package name `dexter` must be unique on npm
+- The package name `dexterdb` must be unique on npm
 - Make sure you own the npm account you're publishing to
 - Consider adding a GitHub repository for issues and contributions
 - The foreign key relation issue can be documented as a known limitation in the README

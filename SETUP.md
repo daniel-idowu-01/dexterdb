@@ -31,7 +31,7 @@
    npm start seed --model User --count 50
 
    # Or using npx
-   npx dexter seed --model User --count 50
+   npx dexterdb seed --model User --count 50
    ```
 
 ## Development

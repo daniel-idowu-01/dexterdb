@@ -22,7 +22,7 @@ try {
 }
 
 program
-  .name("dexter")
+  .name("dexterdb")
   .description("Dexter DB - Generate realistic test data for databases")
   .version(version);
 

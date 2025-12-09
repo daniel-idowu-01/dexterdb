@@ -1,11 +1,11 @@
 {
-  "name": "dexter",
+  "name": "dexterdb",
   "version": "2.0.0",
-  "description": "Dexter - Generate realistic test data for MongoDB databases using Mongoose",
+  "description": "Dexter DB- Generate realistic test data for MongoDB databases using Mongoose",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
   "bin": {
-    "dexter": "./dist/cli.js"
+    "dexterdb": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
@@ -26,7 +26,7 @@
   },
   "keywords": [
     "database",
-    "dexter",
+    "dextedbr",
     "seeder",
     "faker",
     "test-data",
@@ -39,12 +39,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/daniel-idowu-01/dexter.git"
+    "url": "https://github.com/daniel-idowu-01/dexterdb.git"
   },
   "bugs": {
-    "url": "https://github.com/daniel-idowu-01/dexter/issues"
+    "url": "https://github.com/daniel-idowu-01/dexterdb/issues"
   },
-  "homepage": "https://github.com/daniel-idowu-01/dexter#readme",
+  "homepage": "https://github.com/daniel-idowu-01/dexterdb#readme",
   "dependencies": {
     "@faker-js/faker": "^8.3.1",
     "mongoose": "^8.0.0",

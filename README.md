@@ -16,11 +16,11 @@ A powerful TypeScript Node.js library and CLI tool for automatically generating 
 ## Installation
 
 ```bash
-npm install dexter
+npm install dexterdb
 # or
-yarn add dexter
+yarn add dexterdb
 # or
-pnpm add dexter
+pnpm add dexterdb
 ```
 
 ## Prerequisites
@@ -51,19 +51,19 @@ npx prisma generate
 
 ```bash
 # Seed a specific model
-npx dexter seed --model User --count 50
+npx dexterdb seed --model User --count 50
 
 # Seed all models
-npx dexter seed
+npx dexterdb seed
 
 # List available models
-npx dexter list
+npx dexterdb list
 ```
 
 **Using Programmatic API:**
 
 ```typescript
-import { Seeder } from "dexter";
+import { Seeder } from "dexterdb";
 
 const seeder = new Seeder({
   dbUrl: process.env.DATABASE_URL!,
@@ -153,7 +153,7 @@ Create a `seeder.config.json` file to customize seeding behavior:
 ### `seed` - Seed database
 
 ```bash
-npx dexter seed [options]
+npx dexterdb seed [options]
 
 Options:
   -m, --model <model>     Model name to seed
@@ -168,7 +168,7 @@ Options:
 ### `list` - List available models
 
 ```bash
-npx dexter list [options]
+npx dexterdb list [options]
 
 Options:
   --schema <path>         Path to Prisma schema file
@@ -179,7 +179,7 @@ Options:
 ### Basic Usage
 
 ```typescript
-import { Seeder } from "dexter";
+import { Seeder } from "dexterdb";
 
 const seeder = new Seeder({
   dbUrl: process.env.DATABASE_URL!,
@@ -373,7 +373,7 @@ import type {
   ModelConfig,
   FieldConfig,
   SeedResult,
-} from "dexter";
+} from "dexterdb";
 ```
 
 ## Contributing
