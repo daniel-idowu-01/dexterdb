@@ -40,10 +40,10 @@ Create a `.env` file:
 DATABASE_URL="mongodb://localhost:27017/mydb"
 
 # Docker MongoDB with auth
-DATABASE_URL="mongodb://username:password@localhost:27017/mydb?authSource=admin"
+DATABASE_URL="mongodb://<username>:<password>@localhost:27017/mydb?authSource=admin"
 
 # MongoDB Atlas (Cloud)
-DATABASE_URL="mongodb+srv://username:password@cluster.mongodb.net/mydb?retryWrites=true&w=majority"
+DATABASE_URL="mongodb+srv://<username>:<password>@<cluster-url>/mydb?retryWrites=true&w=majority"
 ```
 
 ### 3. Create Mongoose Models
@@ -727,10 +727,10 @@ PostSchema.index({ authorId: 1, createdAt: -1 });
 DATABASE_URL="mongodb://localhost:27017/dev"
 
 # Staging
-DATABASE_URL="mongodb+srv://user:pass@cluster.mongodb.net/staging"
+DATABASE_URL="mongodb+srv://<username>:<password>@<cluster-url>/staging"
 
 # Production
-DATABASE_URL="mongodb+srv://user:pass@cluster.mongodb.net/prod"
+DATABASE_URL="mongodb+srv://<username>:<password>@<cluster-url>/prod"
 ```
 
 ### Security

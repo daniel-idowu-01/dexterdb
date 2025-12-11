@@ -83,12 +83,12 @@ Download from [MongoDB Download Center](https://www.mongodb.com/try/download/com
 ```bash
 cat > .env << 'EOF'
 # For Docker
-DATABASE_URL="mongodb://dexter:dexter123@localhost:27017/dexter_test?authSource=admin"
+DATABASE_URL="mongodb://<username>:<password>@localhost:27017/dexter_test?authSource=admin"
 
-# For MongoDB Atlas
-# DATABASE_URL="mongodb+srv://username:password@cluster.mongodb.net/dexter_test?retryWrites=true&w=majority"
+# MongoDB Atlas example
+# DATABASE_URL="mongodb+srv://<username>:<password>@<cluster-url>/dexter_test?retryWrites=true&w=majority"
 
-# For local MongoDB (no auth)
+# Local MongoDB (no auth)
 # DATABASE_URL="mongodb://localhost:27017/dexter_test"
 EOF
 ```
