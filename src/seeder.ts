@@ -39,12 +39,22 @@ export class Seeder {
   async initialize(): Promise<void> {
     Logger.step("Initializing seeder...");
 
-    await this.parser.connect();
+    try {
+      await this.parser.connect();
 
-    this.models = await this.parser.introspectDatabase();
-    this.mongooseModels = this.parser.getModels();
+      this.models = await this.parser.introspectDatabase();
+      this.mongooseModels = this.parser.getModels();
 
-    Logger.success(`Found ${this.models.length} models in schema`);
+      Logger.success(`Found ${this.models.length} models in schema`);
+
+      const connection = this.parser.getConnection();
+      if (connection.connection.readyState !== 1) {
+        throw new Error("MongoDB connection not ready");
+      }
+    } catch (error: any) {
+      Logger.error(`Failed to initialize seeder: ${error.message}`);
+      throw error;
+    }
   }
 
   async seed(
@@ -54,6 +64,12 @@ export class Seeder {
   ): Promise<SeedResult> {
     try {
       Logger.step(`Seeding ${modelName} with ${count} records...`);
+
+      const connection = this.parser.getConnection();
+      if (connection.connection.readyState !== 1) {
+        Logger.warning("Connection not ready, attempting to reconnect...");
+        await this.parser.connect();
+      }
 
       const model = this.models.find(m => m.name === modelName);
       if (!model) {
@@ -90,6 +106,18 @@ export class Seeder {
       };
     } catch (error: any) {
       Logger.error(`Failed to seed ${modelName}: ${error.message}`);
+      
+      if (error.message.includes("buffering timed out")) {
+        Logger.error("Connection timeout detected. Possible causes:");
+        Logger.error("1. MongoDB server is not running");
+        Logger.error("2. DATABASE_URL is incorrect");
+        Logger.error("3. Network/firewall issues");
+        Logger.error("4. Model not properly connected to database");
+        
+        const connection = this.parser.getConnection();
+        Logger.error(`Connection state: ${connection.connection.readyState} (1=connected, 0=disconnected)`);
+      }
+      
       return {
         model: modelName,
         count: 0,
@@ -288,18 +316,25 @@ export class Seeder {
       return clean;
     });
 
-    if (this.config.global?.randomize) {
-      const shuffled = _.shuffle(cleanData);
-      const results = [];
-      for (const record of shuffled) {
-        const doc = new mongooseModel(record);
-        const saved = await doc.save();
-        results.push(saved);
+    try {
+      if (this.config.global?.randomize) {
+        const shuffled = _.shuffle(cleanData);
+        const results = [];
+        for (const record of shuffled) {
+          const doc = new mongooseModel(record);
+          const saved = await doc.save();
+          results.push(saved);
+        }
+        return { count: results.length };
+      } else {
+        const results = await mongooseModel.insertMany(cleanData, {
+          ordered: false, // Continue on error
+        });
+        return { count: results.length };
       }
-      return { count: results.length };
-    } else {
-      const results = await mongooseModel.insertMany(cleanData);
-      return { count: results.length };
+    } catch (error: any) {
+      Logger.error(`Insert error: ${error.message}`);
+      throw error;
     }
   }
 

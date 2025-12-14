@@ -8,6 +8,7 @@ export class MongooseParser {
   private schemasPath: string;
   private connection: typeof mongoose;
   private models: Map<string, any> = new Map();
+  private isConnected: boolean = false;
 
   constructor(schemasPath?: string, dbUrl?: string) {
     this.schemasPath = schemasPath || join(process.cwd(), "src", "models");
@@ -19,22 +20,35 @@ export class MongooseParser {
   }
 
   async connect(): Promise<void> {
+    if (this.isConnected || this.connection.connection.readyState === 1) {
+      Logger.debug("MongoDB already connected, reusing existing connection");
+      this.isConnected = true;
+      return;
+    }
+
     const dbUrl = process.env.DATABASE_URL;
     if (!dbUrl) {
       throw new Error("DATABASE_URL not found in environment variables");
     }
 
     try {
-      await this.connection.connect(dbUrl);
+      await this.connection.connect(dbUrl, {
+        serverSelectionTimeoutMS: 5000,
+        socketTimeoutMS: 45000,
+        maxPoolSize: 10,
+      });
+      
+      this.isConnected = true;
       Logger.success("Connected to MongoDB");
-    } catch (error) {
-      Logger.error(`Failed to connect to MongoDB: ${error}`);
+    } catch (error: any) { 
+      Logger.error(`Failed to connect to MongoDB: ${error.message}`);
       throw error;
     }
   }
 
   async parseSchema(): Promise<SchemaModel[]> {
     try {
+      await this.connect();
       await this.loadModels();
 
       const models: SchemaModel[] = [];
@@ -54,6 +68,16 @@ export class MongooseParser {
 
   private async loadModels(): Promise<void> {
     try {
+      const existingModels = Object.keys(this.connection.models);
+      if (existingModels.length > 0) {
+        Logger.debug(`Found ${existingModels.length} pre-registered models in mongoose`);
+        for (const modelName of existingModels) {
+          const model = this.connection.models[modelName];
+          this.models.set(modelName, model);
+          Logger.debug(`Using pre-registered model: ${modelName}`);
+        }
+      }
+
       const files = readdirSync(this.schemasPath);
 
       for (const file of files) {
@@ -70,17 +94,39 @@ export class MongooseParser {
           delete require.cache[require.resolve(filePath)];
 
           const modelModule = require(filePath);
-
           const exportedModel = modelModule.default || modelModule;
 
           if (exportedModel && exportedModel.modelName) {
-            this.models.set(exportedModel.modelName, exportedModel);
-            Logger.debug(`Loaded model: ${exportedModel.modelName}`);
+            const registeredModel = this.connection.models[exportedModel.modelName];
+            
+            if (registeredModel) {
+              this.models.set(exportedModel.modelName, registeredModel);
+              Logger.debug(`Using registered model: ${exportedModel.modelName}`);
+            } else if (exportedModel.db && exportedModel.db.readyState === 1) {
+              this.models.set(exportedModel.modelName, exportedModel);
+              Logger.debug(`Loaded connected model: ${exportedModel.modelName}`);
+            } else if (exportedModel.db && exportedModel.db !== this.connection.connection) {
+              Logger.debug(`Re-registering model with active connection: ${exportedModel.modelName}`);
+              const schema = exportedModel.schema;
+              const reRegisteredModel = this.connection.model(exportedModel.modelName, schema);
+              this.models.set(exportedModel.modelName, reRegisteredModel);
+            } else {
+              this.models.set(exportedModel.modelName, exportedModel);
+              Logger.debug(`Loaded model: ${exportedModel.modelName}`);
+            }
           } else if (typeof exportedModel === "object") {
             for (const [key, value] of Object.entries(exportedModel)) {
               if (value && typeof value === "object" && (value as any).modelName) {
-                this.models.set((value as any).modelName, value);
-                Logger.debug(`Loaded model: ${(value as any).modelName}`);
+                const modelName = (value as any).modelName;
+                const registeredModel = this.connection.models[modelName];
+                
+                if (registeredModel) {
+                  this.models.set(modelName, registeredModel);
+                  Logger.debug(`Using registered model: ${modelName}`);
+                } else {
+                  this.models.set(modelName, value);
+                  Logger.debug(`Loaded model: ${modelName}`);
+                }
               }
             }
           }
@@ -92,6 +138,28 @@ export class MongooseParser {
       if (this.models.size === 0) {
         Logger.warning(`No Mongoose models found in ${this.schemasPath}`);
         Logger.info("Make sure your models are properly exported and the path is correct");
+      } else {
+        Logger.debug(`Total models loaded: ${this.models.size}`);
+        
+        // Verify all models are connected
+        for (const [name, model] of this.models.entries()) {
+          const state = model.db ? model.db.readyState : 'unknown';
+          const stateText = state === 1 ? 'connected' : state === 0 ? 'disconnected' : state;
+          Logger.debug(`  ${name}: ${stateText}`);
+          
+          // If model is not connected, try to fix it
+          if (model.db && model.db.readyState !== 1) {
+            Logger.warning(`Model ${name} is not connected, attempting to re-register...`);
+            try {
+              const schema = model.schema;
+              const fixedModel = this.connection.model(name, schema);
+              this.models.set(name, fixedModel);
+              Logger.debug(`  ✓ Re-registered ${name} with active connection`);
+            } catch (error) {
+              Logger.debug(`  Could not re-register ${name}: ${error}`);
+            }
+          }
+        }
       }
     } catch (error) {
       Logger.error(`Failed to load models: ${error}`);
@@ -168,7 +236,6 @@ export class MongooseParser {
     };
 
     result.isRequired = schemaType.isRequired || false;
-
     result.isUnique = schemaType.options?.unique || false;
 
     if (schemaType.options?.default !== undefined) {
@@ -257,7 +324,16 @@ export class MongooseParser {
   }
 
   async disconnect(): Promise<void> {
-    await this.connection.disconnect();
-    Logger.debug("Disconnected from MongoDB");
+    if (this.isConnected && this.connection.connection.readyState === 1) {
+      const modelCount = Object.keys(this.connection.models).length;
+      if (modelCount === 0 || this.models.size === 0) {
+        await this.connection.disconnect();
+        this.isConnected = false;
+        Logger.debug("Disconnected from MongoDB");
+      } else {
+        Logger.debug("Keeping MongoDB connection open (models still registered)");
+        this.isConnected = false;
+      }
+    }
   }
 }
