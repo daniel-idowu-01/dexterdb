@@ -2,23 +2,23 @@
 
 A powerful TypeScript Node.js library and CLI tool for automatically generating realistic test data for MongoDB databases using **Mongoose ODM**.
 
-## 🎯 Key Features
+## Key Features
 
-- ✅ **Mongoose Native Support** - Works directly with Mongoose schemas and models
-- 🎲 **Intelligent Data Generation** - Context-aware fake data using Faker.js
-- 🔗 **Smart Reference Resolution** - Automatically handles ObjectId references between documents
-- ⚙️ **Highly Configurable** - JSON/YAML config files with field-level customization
-- 🚀 **CLI & Programmatic API** - Use as a CLI tool or import as a library
-- 📊 **Dependency-Aware Seeding** - Automatically determines correct seeding order
-- 🎨 **Type-Aware Generators** - Detects field patterns (OTP, email, phone, etc.)
+- **Mongoose Native Support** - Works directly with Mongoose schemas and models
+- **Intelligent Data Generation** - Context-aware fake data using Faker.js
+- **Smart Reference Resolution** - Automatically handles ObjectId references between documents
+- **Highly Configurable** - JSON/YAML config files with field-level customization
+- **CLI & Programmatic API** - Use as a CLI tool or import as a library
+- **Dependency-Aware Seeding** - Automatically determines correct seeding order
+- **Type-Aware Generators** - Detects field patterns (OTP, email, phone, etc.)
 
-## 📋 Prerequisites
+## Prerequisites
 
 - Node.js >= 18.0.0
 - MongoDB database (local or cloud like MongoDB Atlas)
 - Mongoose models defined in TypeScript/JavaScript
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Install Dependencies
 
@@ -146,7 +146,7 @@ npx dexterdb list
 npx ts-node cli.ts seed --model User --count 50
 ```
 
-## 🎨 Smart Field Detection
+## Smart Field Detection
 
 Dexter DB automatically generates appropriate data based on field names:
 
@@ -166,7 +166,7 @@ Dexter DB automatically generates appropriate data based on field names:
 | `price`, `amount` | Decimal number |
 | `channel` | Random from ['email', 'sms', 'whatsapp', 'push'] |
 
-## 🔧 Configuration
+## Configuration
 
 ### Basic Configuration
 
@@ -300,7 +300,7 @@ Create `seeder.config.json`:
 }
 ```
 
-## 💻 Programmatic API
+## Programmatic API
 
 ### Basic Usage
 
@@ -323,9 +323,9 @@ async function seedDatabase() {
 
     await seeder.seedAll();
 
-    console.log("✅ Seeding completed!");
+    console.log("Seeding completed!");
   } catch (error) {
-    console.error("❌ Seeding failed:", error);
+    console.error("Seeding failed:", error);
   } finally {
     await seeder.disconnect();
   }
@@ -380,7 +380,7 @@ await seeder.seed("Post", 500, {
 await seeder.disconnect();
 ```
 
-## 📊 Mongoose-Specific Features
+## Mongoose-Specific Features
 
 ### 1. ObjectId References
 
@@ -494,7 +494,7 @@ const UserSchema = new Schema({
 // Seeder respects timestamps option
 ```
 
-## 🐳 Docker Setup
+## Docker Setup
 
 ### Quick Start with Docker Compose
 
@@ -532,7 +532,7 @@ Connection string:
 DATABASE_URL="mongodb://dexter:dexter123@localhost:27017/dexter_test?authSource=admin"
 ```
 
-## 🔍 Verifying Data
+## Verifying Data
 
 ### Using MongoDB Compass (GUI)
 
@@ -574,7 +574,7 @@ console.log('Sample data:', { users, posts });
 await mongoose.disconnect();
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 your-project/
@@ -592,7 +592,7 @@ your-project/
 └── docker-compose.yml       # Optional: MongoDB setup
 ```
 
-## ⚙️ CLI Options
+## CLI Options
 
 ```bash
 # Seed specific model
@@ -618,7 +618,7 @@ npx dexterdb --help
 npx dexterdb seed --help
 ```
 
-## 🧪 Testing Integration
+## Testing Integration
 
 ```typescript
 import { Seeder } from 'dexterdb';
@@ -648,7 +648,7 @@ afterAll(async () => {
 });
 ```
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### "No models found"
 
@@ -705,7 +705,7 @@ const seeder = new Seeder({
 });
 ```
 
-## 📊 Performance Tips
+## Performance Tips
 
 1. **Use Batch Insert** - Default behavior for best performance
 2. **Limit Relations** - Configure min/max for array references
@@ -718,7 +718,7 @@ UserSchema.index({ email: 1 });
 PostSchema.index({ authorId: 1, createdAt: -1 });
 ```
 
-## 🔐 Production Considerations
+## Production Considerations
 
 ### Environment Variables
 
@@ -747,7 +747,7 @@ DATABASE_URL="mongodb+srv://<username>:<password>@<cluster-url>/prod"
 - Test with small datasets first
 - Consider data privacy regulations
 
-## 📚 Additional Resources
+## Additional Resources
 
 - [Mongoose Documentation](https://mongoosejs.com/docs/)
 - [MongoDB Manual](https://docs.mongodb.com/manual/)
@@ -755,11 +755,11 @@ DATABASE_URL="mongodb+srv://<username>:<password>@<cluster-url>/prod"
 - [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) - Free cloud database
 - [GitHub Repository](https://github.com/daniel-idowu-01/dexterdb)
 
-## 📝 License
+## License
 
 MIT
 
-## 🤝 Contributing
+## Contributing
 
 Contributions welcome! Please open an issue or PR on GitHub.
 
