@@ -8,6 +8,8 @@ import { Logger } from "./src/utils/logger";
 import { readFileSync } from "fs";
 import { join } from "path";
 
+const MAX_CLI_SEED_COUNT = 100_000;
+
 config();
 
 const program = new Command();
@@ -59,7 +61,11 @@ program
 
       if (options.model) {
         spinner.text = `Seeding ${options.model}...`;
-        const count = parseInt(options.count, 10) || 10;
+        let count = parseInt(options.count, 10);
+        if (!Number.isFinite(count) || count < 1) {
+          count = 10;
+        }
+        count = Math.min(count, MAX_CLI_SEED_COUNT);
 
         const result = await seeder.seed(options.model, count, {
           ...(options.reset && { reset: true }),
@@ -101,7 +107,9 @@ program
       await seeder.disconnect();
     } catch (error: any) {
       spinner.fail(`Error: ${error.message}`);
-      Logger.error(error.stack);
+      if (process.env.DEBUG) {
+        Logger.error(error.stack);
+      }
       process.exit(1);
     }
   });

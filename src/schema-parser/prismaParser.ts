@@ -2,6 +2,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { SchemaModel, SchemaField, SchemaRelation } from "../types";
 import { Logger } from "../utils/logger";
+import { resolvePathWithinRoot } from "../utils/pathSecurity";
 
 function getPrismaClient(): any {
   try {
@@ -19,7 +20,8 @@ export class PrismaParser {
   private prisma: any;
 
   constructor(schemaPath?: string) {
-    this.schemaPath = schemaPath || join(process.cwd(), "prisma", "schema.prisma");
+    const fallback = join(process.cwd(), "prisma", "schema.prisma");
+    this.schemaPath = resolvePathWithinRoot(schemaPath ?? fallback);
     const PrismaClient = getPrismaClient();
     this.prisma = new PrismaClient();
   }

@@ -1,5 +1,11 @@
 import { faker } from "@faker-js/faker";
 import { FieldConfig } from "../types";
+import { Logger } from "../utils/logger";
+
+/** Allows only dotted paths like `internet.email` (faker API segments). */
+const FAKER_GENERATOR_PATH = /^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)*$/;
+const DISALLOWED_GENERATOR_PARTS = new Set(["__proto__", "constructor", "prototype"]);
+const MAX_PATTERN_LENGTH = 240;
 
 export abstract class BaseGenerator {
   abstract generate(fieldName: string, config?: FieldConfig): any;
@@ -60,19 +66,38 @@ export class StringGenerator extends BaseGenerator {
     }
 
     if (config?.pattern) {
-      return faker.helpers.fromRegExp(config.pattern);
+      if (config.pattern.length > MAX_PATTERN_LENGTH) {
+        Logger.warning("pattern exceeds maximum length; using fallback string");
+        return faker.lorem.words(3);
+      }
+      try {
+        return faker.helpers.fromRegExp(config.pattern);
+      } catch {
+        return faker.lorem.words(3);
+      }
     }
 
     return faker.lorem.words(3);
   }
 
   private useCustomGenerator(generator: string): string {
+    if (!FAKER_GENERATOR_PATH.test(generator)) {
+      Logger.warning(`Rejected unsafe generator path: ${generator}`);
+      return faker.lorem.words(3);
+    }
+
     const parts = generator.split(".");
-    let value: any = faker;
+    if (parts.some((p) => DISALLOWED_GENERATOR_PARTS.has(p))) {
+      Logger.warning(`Rejected unsafe generator path: ${generator}`);
+      return faker.lorem.words(3);
+    }
+    let value: unknown = faker;
 
     for (const part of parts) {
-      if (value && typeof value[part] === "function") {
-        value = value[part]();
+      const record = value as Record<string, unknown>;
+      const next = record[part];
+      if (typeof next === "function") {
+        value = (next as () => unknown)();
       } else {
         return faker.lorem.words(3);
       }

@@ -1,22 +1,26 @@
-import { readdirSync, readFileSync, statSync } from "fs";
+import { readdirSync, statSync } from "fs";
 import { join, extname } from "path";
 import { SchemaModel, SchemaField, SchemaRelation } from "../types";
 import { Logger } from "../utils/logger";
 import mongoose from "mongoose";
+import { joinSafe, resolvePathWithinRoot } from "../utils/pathSecurity";
 
 export class MongooseParser {
   private schemasPath: string;
+  private readonly dbUrl?: string;
   private connection: typeof mongoose;
   private models: Map<string, any> = new Map();
   private isConnected: boolean = false;
 
   constructor(schemasPath?: string, dbUrl?: string) {
-    this.schemasPath = schemasPath || join(process.cwd(), "src", "models");
-    this.connection = mongoose;
-
-    if (dbUrl) {
-      process.env.DATABASE_URL = dbUrl;
+    const defaultPath = join(process.cwd(), "src", "models");
+    try {
+      this.schemasPath = resolvePathWithinRoot(schemasPath ?? defaultPath);
+    } catch (error: any) {
+      throw new Error(`Invalid models path: ${error.message}`);
     }
+    this.connection = mongoose;
+    this.dbUrl = dbUrl;
   }
 
   async connect(): Promise<void> {
@@ -26,7 +30,7 @@ export class MongooseParser {
       return;
     }
 
-    const dbUrl = process.env.DATABASE_URL;
+    const dbUrl = this.dbUrl || process.env.DATABASE_URL;
     if (!dbUrl) {
       throw new Error("DATABASE_URL not found in environment variables");
     }
@@ -81,7 +85,7 @@ export class MongooseParser {
       const files = readdirSync(this.schemasPath);
 
       for (const file of files) {
-        const filePath = join(this.schemasPath, file);
+        const filePath = joinSafe(this.schemasPath, file);
         const stat = statSync(filePath);
 
         if (stat.isDirectory()) continue;

@@ -36,6 +36,15 @@ describe("Generators", () => {
       expect(typeof value).toBe("string");
       expect(value).toMatch(/^https?:\/\//);
     });
+
+    it("should reject non-faker generator paths", () => {
+      const config: FieldConfig = {
+        generator: "constructor.constructor",
+      };
+      const value = generator.generate("field", config);
+      expect(typeof value).toBe("string");
+      expect(value.length).toBeGreaterThan(0);
+    });
   });
 
   describe("NumberGenerator", () => {

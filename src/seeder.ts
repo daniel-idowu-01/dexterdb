@@ -21,6 +21,17 @@ import {
 import _ from "lodash";
 import mongoose from "mongoose";
 
+const MIN_SEED_COUNT = 1;
+const MAX_SEED_COUNT = 100_000;
+
+function clampSeedCount(count: number): number {
+  if (!Number.isFinite(count)) {
+    return 10;
+  }
+  const n = Math.floor(count);
+  return Math.min(MAX_SEED_COUNT, Math.max(MIN_SEED_COUNT, n));
+}
+
 export class Seeder {
   private options: SeederOptions;
   private parser: MongooseParser;
@@ -62,6 +73,7 @@ export class Seeder {
     count: number = 10,
     options?: Partial<ModelConfig>
   ): Promise<SeedResult> {
+    count = clampSeedCount(count);
     try {
       Logger.step(`Seeding ${modelName} with ${count} records...`);
 
@@ -354,7 +366,7 @@ export class Seeder {
 
     for (const model of sortedModels) {
       const modelConfig = ConfigLoader.getModelConfig(this.config, model.name);
-      const count = modelConfig.count || 10;
+      const count = clampSeedCount(modelConfig.count ?? 10);
 
       const result = await this.seed(model.name, count, modelConfig);
       results.push(result);
