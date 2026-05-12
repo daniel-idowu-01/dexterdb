@@ -146,6 +146,34 @@ npx dexterdb list
 npx ts-node cli.ts seed --model User --count 50
 ```
 
+## Docker
+
+A `Dockerfile` is included for building a production-ready image of the CLI.
+
+Build the image:
+
+```bash
+docker build -t dexterdb .
+```
+
+Run the CLI help:
+
+```bash
+docker run --rm dexterdb
+```
+
+Seed a model with environment variables loaded from `.env`:
+
+```bash
+docker run --rm --env-file .env dexterdb seed --model User --count 50
+```
+
+Mount the project directory if you need local schema or config files:
+
+```bash
+docker run --rm --env-file .env -v "$PWD":/usr/src/app dexterdb seed --model User --count 50 --config /usr/src/app/seeder.config.json
+```
+
 ## Smart Field Detection
 
 Dexter DB automatically generates appropriate data based on field names:
