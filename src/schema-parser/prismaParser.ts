@@ -18,18 +18,46 @@ function getPrismaClient(): any {
 export class PrismaParser {
   private schemaPath: string;
   private prisma: any;
+  private dbUrl?: string;
+  private enums: Record<string, string[]> = {};
 
-  constructor(schemaPath?: string) {
+  constructor(schemaPath?: string, dbUrl?: string) {
     const fallback = join(process.cwd(), "prisma", "schema.prisma");
     this.schemaPath = resolvePathWithinRoot(schemaPath ?? fallback);
+    this.dbUrl = dbUrl;
+
     const PrismaClient = getPrismaClient();
-    this.prisma = new PrismaClient();
+    const prismaOptions: any = {};
+    if (dbUrl) {
+      prismaOptions.datasources = {
+        db: {
+          url: dbUrl,
+        },
+      };
+    }
+
+    this.prisma = new PrismaClient(prismaOptions);
   }
 
+  async connect(): Promise<void> {
+    const dbUrl = this.dbUrl || process.env.DATABASE_URL;
+    if (!dbUrl) {
+      throw new Error("DATABASE_URL not found in environment variables");
+    }
+
+    try {
+      await this.prisma.$connect();
+      Logger.success("Connected to Prisma database");
+    } catch (error: any) {
+      Logger.error(`Failed to connect to Prisma database: ${error.message}`);
+      throw error;
+    }
+  }
 
   async parseSchema(): Promise<SchemaModel[]> {
     try {
       const schemaContent = readFileSync(this.schemaPath, "utf-8");
+      this.enums = this.extractEnums(schemaContent);
       const models = this.extractModels(schemaContent);
       Logger.debug(`Parsed ${models.length} models from schema`);
       return models;
@@ -41,13 +69,32 @@ export class PrismaParser {
 
   async introspectDatabase(): Promise<SchemaModel[]> {
     try {
-      const models = await this.parseSchema();
-      
-      return models;
+      return await this.parseSchema();
     } catch (error) {
       Logger.error(`Failed to introspect database: ${error}`);
       throw error;
     }
+  }
+
+  private extractEnums(schemaContent: string): Record<string, string[]> {
+    const enums: Record<string, string[]> = {};
+    const enumRegex = /enum\s+(\w+)\s*\{([^}]+)\}/g;
+    let match;
+
+    while ((match = enumRegex.exec(schemaContent)) !== null) {
+      const enumName = match[1];
+      const enumBody = match[2];
+      const values = enumBody
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith("//"))
+        .map((line) => line.split(" ")[0].trim())
+        .filter((value) => value.length > 0);
+
+      enums[enumName] = values;
+    }
+
+    return enums;
   }
 
   private extractModels(schemaContent: string): SchemaModel[] {
@@ -58,9 +105,8 @@ export class PrismaParser {
     while ((match = modelRegex.exec(schemaContent)) !== null) {
       const modelName = match[1];
       const modelBody = match[2];
-      
-      const relations = this.extractRelations(modelBody, modelName);
-      const fields = this.extractFields(modelBody, modelName, models);
+      const relations = this.extractRelations(modelBody);
+      const fields = this.extractFields(modelBody);
 
       models.push({
         name: modelName,
@@ -72,17 +118,28 @@ export class PrismaParser {
     return models;
   }
 
-  private extractFields(modelBody: string, modelName: string, allModels: SchemaModel[] = []): SchemaField[] {
+  private extractFields(modelBody: string): SchemaField[] {
     const fields: SchemaField[] = [];
     const lines = modelBody.split("\n");
-    
+    const scalarTypes = new Set([
+      "String",
+      "Int",
+      "Float",
+      "Boolean",
+      "DateTime",
+      "Json",
+      "Bytes",
+      "BigInt",
+      "Decimal",
+    ]);
+
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("}")) {
         continue;
       }
 
-      const fieldMatch = trimmed.match(/^(\w+)\s+([A-Z][a-zA-Z0-9]*\??)(\s+.*)?$/);
+      const fieldMatch = trimmed.match(/^(\w+)\s+([A-Za-z0-9_]+(?:\[\])?\??)(\s+.*)?$/);
       if (!fieldMatch) {
         continue;
       }
@@ -90,12 +147,11 @@ export class PrismaParser {
       const fieldName = fieldMatch[1];
       const fieldType = fieldMatch[2];
       const attributes = fieldMatch[3] || "";
+      const fieldTypeBase = fieldType.replace("?", "").replace("[]", "");
+      const isRelationField = !scalarTypes.has(fieldTypeBase) &&
+        (attributes.includes("@relation") || fieldType.endsWith("[]"));
 
-      const isRelationField = 
-        !["String", "Int", "Float", "Boolean", "DateTime", "Json", "Bytes", "BigInt", "Decimal"].includes(fieldType.replace("?", "")) &&
-        (attributes.includes("@relation") || trimmed.includes("[]") || fieldType.endsWith("?"));
-      
-      if (isRelationField && !attributes.includes("fields:")) {
+      if (isRelationField) {
         continue;
       }
 
@@ -103,64 +159,64 @@ export class PrismaParser {
       const cleanType = fieldType.replace("?", "");
       const isUnique = attributes.includes("@unique");
       const isPrimaryKey = attributes.includes("@id");
-      const isForeignKey = modelBody.includes(`@relation`) && 
+      const isForeignKey = modelBody.includes("@relation") &&
                           modelBody.includes(`fields: [${fieldName}]`);
       const isUpdatedAt = attributes.includes("@updatedAt");
-      
+
       let defaultValue: any = undefined;
       const defaultMatch = attributes.match(/@default\(([^()]+(?:\([^()]*\)[^()]*)*)\)/);
       if (defaultMatch) {
         const defaultValueStr = defaultMatch[1].trim();
-        if (defaultValueStr === "now()" || 
-            defaultValueStr === "uuid()" || 
-            defaultValueStr === "autoincrement()" ||
-            defaultValueStr.startsWith("autoincrement")) {
+        if (
+          defaultValueStr === "now()" ||
+          defaultValueStr === "uuid()" ||
+          defaultValueStr === "autoincrement()" ||
+          defaultValueStr.startsWith("autoincrement")
+        ) {
           defaultValue = undefined;
         } else {
           defaultValue = this.parseDefaultValue(defaultValueStr);
         }
       }
-      
+
       if (isUpdatedAt) {
         continue;
       }
 
-      let enumValues: string[] | undefined = undefined;
-      if (cleanType.toLowerCase().startsWith("enum")) {
-        enumValues = undefined;
-      }
+      let relationModel: string | undefined;
+      let relationField: string | undefined;
 
-      let relationModel: string | undefined = undefined;
-      let relationField: string | undefined = undefined;
-      
       if (isForeignKey) {
         const relationLineMatch = modelBody.match(
-          new RegExp(`(\\w+)\\s+(\\w+)\\s+@relation\\([^)]*fields:\\s*\\[${fieldName}\\][^)]*\\)`, 'g')
+          new RegExp(`(\\w+)\\s+(\\w+)\\s+@relation\\([^)]*fields:\s*\\[${fieldName}\\][^)]*\\)`, 'g')
         );
         if (relationLineMatch && relationLineMatch.length > 0) {
           const parts = relationLineMatch[0].match(/(\w+)\s+(\w+)/);
           if (parts && parts[2]) {
             const potentialModel = parts[2];
-            if (!["String", "Int", "Float", "Boolean", "DateTime", "Json", "Bytes", "BigInt", "Decimal"].includes(potentialModel)) {
+            if (!scalarTypes.has(potentialModel)) {
               relationModel = potentialModel;
             }
           }
         }
       }
+
       const relationMatch = attributes.match(/@relation\([^)]*fields:\s*\[([^\]]+)\][^)]*references:\s*\[([^\]]+)\][^)]*\)/);
       if (relationMatch) {
         relationField = relationMatch[2].trim();
-        const relationLineMatch = modelBody.match(new RegExp(`(\\w+)\\s+(\\w+)\\s+@relation\\([^)]*fields:\\s*\\[${fieldName}\\][^)]*\\)`, 'g'));
+        const relationLineMatch = modelBody.match(new RegExp(`(\\w+)\\s+(\\w+)\\s+@relation\\([^)]*fields:\s*\\[${fieldName}\\][^)]*\\)`, 'g'));
         if (relationLineMatch) {
           const parts = relationLineMatch[0].match(/(\w+)\s+(\w+)/);
           if (parts && parts[2]) {
             const potentialModel = parts[2];
-            if (!["String", "Int", "Float", "Boolean", "DateTime", "Json", "Bytes", "BigInt", "Decimal"].includes(potentialModel)) {
+            if (!scalarTypes.has(potentialModel)) {
               relationModel = potentialModel;
             }
           }
         }
       }
+
+      const enumValues = this.enums[fieldTypeBase];
 
       fields.push({
         name: fieldName,
@@ -179,17 +235,35 @@ export class PrismaParser {
     return fields;
   }
 
-  private extractRelations(modelBody: string, modelName: string): SchemaRelation[] {
+  private extractRelations(modelBody: string): SchemaRelation[] {
     const relations: SchemaRelation[] = [];
-    const relationRegex = /(\w+)\s+(\w+)(\?|\[\])?\s+(@relation\([^)]+\))?/g;
+    const scalarTypes = new Set([
+      "String",
+      "Int",
+      "Float",
+      "Boolean",
+      "DateTime",
+      "Json",
+      "Bytes",
+      "BigInt",
+      "Decimal",
+    ]);
+
+    const relationRegex = /(\w+)\s+([A-Z][a-zA-Z0-9_]*)(\?|\[\])?\s+(@relation\([^)]+\))?/g;
     let match;
 
     while ((match = relationRegex.exec(modelBody)) !== null) {
       const fieldName = match[1];
       const relationModelName = match[2];
-      const isOptional = match[3] === "?";
-      const isArray = match[3] === "[]";
+      const modifier = match[3] || "";
       const relationAttr = match[4] || "";
+
+      if (scalarTypes.has(relationModelName)) {
+        continue;
+      }
+
+      const isOptional = modifier === "?";
+      const isArray = modifier === "[]";
 
       let relationType: "oneToOne" | "oneToMany" | "manyToMany" = "oneToMany";
       if (isOptional && !isArray) {
@@ -198,7 +272,7 @@ export class PrismaParser {
         relationType = "manyToMany";
       }
 
-      let foreignKey: string | undefined = undefined;
+      let foreignKey: string | undefined;
       const fkMatch = relationAttr.match(/fields:\s*\[([^\]]+)\]/);
       if (fkMatch) {
         foreignKey = fkMatch[1].trim();
@@ -235,11 +309,11 @@ export class PrismaParser {
       return "boolean";
     }
 
-    if (cleanType.startsWith("enum") || cleanType.match(/^[A-Z]/)) {
+    if (this.enums[cleanType]) {
       return "enum";
     }
 
-    return cleanType.toLowerCase();
+    return "enum";
   }
 
   private parseDefaultValue(value: string): any {
@@ -274,4 +348,3 @@ export class PrismaParser {
     await this.prisma.$disconnect();
   }
 }
-

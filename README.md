@@ -1,6 +1,6 @@
-# Dexter DB Seeder - MongoDB Edition
+# Dexter DB Seeder - MongoDB + PostgreSQL
 
-A powerful TypeScript Node.js library and CLI tool for automatically generating realistic test data for MongoDB databases using **Mongoose ODM**.
+A powerful TypeScript Node.js library and CLI tool for automatically generating realistic test data for MongoDB and PostgreSQL databases.
 
 ## Key Features
 
@@ -15,8 +15,9 @@ A powerful TypeScript Node.js library and CLI tool for automatically generating 
 ## Prerequisites
 
 - Node.js >= 18.0.0
-- MongoDB database (local or cloud like MongoDB Atlas)
-- Mongoose models defined in TypeScript/JavaScript
+- MongoDB database (local or cloud like MongoDB Atlas) or PostgreSQL database via Prisma
+- Mongoose models defined in TypeScript/JavaScript for MongoDB
+- Prisma schema and generated `@prisma/client` for PostgreSQL
 
 ## Quick Start
 
@@ -27,8 +28,9 @@ npm install dexterdb mongoose
 # or
 yarn add dexterdb mongoose
 
-# dev dependencies
-npm install -D typescript @types/node ts-node
+# PostgreSQL + Prisma support
+npm install dexterdb @prisma/client
+npm install -D prisma typescript @types/node ts-node
 ```
 
 ### 2. Setup MongoDB Connection
@@ -44,6 +46,21 @@ DATABASE_URL="mongodb://<username>:<password>@localhost:27017/mydb?authSource=ad
 
 # MongoDB Atlas (Cloud)
 DATABASE_URL="mongodb+srv://<username>:<password>@<cluster-url>/mydb?retryWrites=true&w=majority"
+```
+
+### 2.b Setup PostgreSQL Connection (Prisma)
+
+Create a `.env` file with a PostgreSQL URL and point to a Prisma schema file when needed:
+
+```env
+DATABASE_URL="postgresql://postgres:your_password@localhost:5432/dexter_test?schema=public"
+```
+
+Make sure you have a valid `prisma/schema.prisma` file and run:
+
+```bash
+npx prisma generate
+npx prisma db push
 ```
 
 ### 3. Create Mongoose Models
@@ -133,10 +150,13 @@ npm run build
 
 npx dexterdb seed --model User --count 50
 
+# PostgreSQL (Prisma schema)
+npx dexterdb seed --model User --count 50 --schema prisma/schema.prisma
+
 # Seed all models (automatic dependency ordering)
 npx dexterdb seed
 
-# Reset collection before seeding
+# Reset collection/table before seeding
 npx dexterdb seed --model User --count 50 --reset
 
 # List available models
@@ -144,7 +164,7 @@ npx dexterdb list
 
 # Using ts-node for development
 npx ts-node cli.ts seed --model User --count 50
-```
+``` 
 
 ## Docker
 

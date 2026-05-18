@@ -1,7 +1,7 @@
 {
   "name": "dexterdb",
   "version": "2.0.6",
-  "description": "Dexter DB- Generate realistic test data for MongoDB databases using Mongoose",
+  "description": "Dexter DB - Generate realistic test data for MongoDB and PostgreSQL databases",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
   "bin": {
@@ -47,6 +47,7 @@
   "homepage": "https://github.com/daniel-idowu-01/dexterdb#readme",
   "dependencies": {
     "@faker-js/faker": "^8.3.1",
+    "@prisma/client": "^5.19.1",
     "mongoose": "^8.0.0",
     "chalk": "^4.1.2",
     "commander": "^12.1.0",
