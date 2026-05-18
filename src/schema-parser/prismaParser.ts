@@ -148,8 +148,8 @@ export class PrismaParser {
       const fieldType = fieldMatch[2];
       const attributes = fieldMatch[3] || "";
       const fieldTypeBase = fieldType.replace("?", "").replace("[]", "");
-      const isRelationField = !scalarTypes.has(fieldTypeBase) &&
-        (attributes.includes("@relation") || fieldType.endsWith("[]"));
+      const isEnumType = Boolean(this.enums[fieldTypeBase]);
+      const isRelationField = !scalarTypes.has(fieldTypeBase) && !isEnumType;
 
       if (isRelationField) {
         continue;

@@ -66,6 +66,30 @@ enum PostStatus {
     expect(postModel?.fields.find((f) => f.name === "status")?.enumValues).toEqual(["DRAFT", "PUBLISHED", "ARCHIVED"]);
   });
 
+  it("skips optional Prisma relation fields without explicit @relation", async () => {
+    const schema = `
+model User {
+  id      Int      @id @default(autoincrement())
+  email   String   @unique
+  profile Profile?
+}
+
+model Profile {
+  id     Int   @id @default(autoincrement())
+  userId Int   @unique
+  user   User  @relation(fields: [userId], references: [id])
+}
+`;
+
+    writeFileSync(schemaPath, schema);
+    const parser = new PrismaParser(schemaPath, "postgresql://user:pass@localhost:5432/test");
+    const models = await parser.parseSchema();
+    const userModel = models.find((m) => m.name === "User");
+
+    expect(userModel).toBeDefined();
+    expect(userModel?.fields.map((f) => f.name)).toEqual(["id", "email"]);
+  });
+
   it("connects and disconnects with Prisma client", async () => {
     const schema = `model Test { id Int @id @default(autoincrement()) }`;
     writeFileSync(schemaPath, schema);
