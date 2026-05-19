@@ -12,12 +12,74 @@ A powerful TypeScript Node.js library and CLI tool for automatically generating 
 - **Dependency-Aware Seeding** - Automatically determines correct seeding order
 - **Type-Aware Generators** - Detects field patterns (OTP, email, phone, etc.)
 
+## How It Works (Overview)
+
+- Detection: the seeder auto-detects the backend from `DATABASE_URL` (MongoDB vs PostgreSQL). You can override it by passing `dbType` to the `Seeder` constructor.
+- MongoDB path: uses the `MongooseParser` to load Mongoose models from `src/models/`, introspect schema fields and relations, then seeds via Mongoose model APIs.
+- PostgreSQL path: uses the `PrismaParser` to parse `prisma/schema.prisma`, extract models/fields/relations, and inserts via the generated `@prisma/client` delegates.
+- Relationship handling: the seeder orders models by dependency, resolves foreign keys from already-seeded parents (or from the live database), and ensures unique FK constraints are respected.
+
+This design keeps data generation logic database-agnostic while delegating model parsing and write semantics to a database-specific parser (Mongoose or Prisma).
+
 ## Prerequisites
 
 - Node.js >= 18.0.0
 - MongoDB database (local or cloud like MongoDB Atlas) or PostgreSQL database via Prisma
 - Mongoose models defined in TypeScript/JavaScript for MongoDB
 - Prisma schema and generated `@prisma/client` for PostgreSQL
+
+## For Developers & Contributors
+
+If you want to contribute or work on Dexter locally, follow these steps.
+
+1. Clone and install
+
+```bash
+git clone https://github.com/daniel-idowu-01/dexterdb.git
+cd dexterdb
+npm install
+```
+
+2. Environment
+
+Create a `.env` with a `DATABASE_URL` for the backend you are using (MongoDB or PostgreSQL).
+
+3. Start local databases (optional — Docker)
+
+```bash
+npm run db:up
+```
+
+4. Prisma setup (PostgreSQL only)
+
+```bash
+npm run prisma:generate
+npm run prisma:push
+```
+
+5. Build & run tests
+
+```bash
+npm run build
+npm test
+```
+
+6. Development (fast iteration)
+
+Use `ts-node` during development to run the CLI or test scripts without building:
+
+```bash
+npx ts-node cli.ts seed --model User --count 10 --schema prisma/schema.prisma
+```
+
+7. Contributing guidelines
+
+- Add unit tests for new parsers, generators, or features under `tests/`.
+- Keep changes narrowly scoped and add regression tests for parser edge cases (relations, enums, defaults).
+- Run `npm run format` before committing.
+- Open a pull request with a clear description of the change and testing steps.
+
+If you plan to add support for another database backend, implement a new `SchemaParser` that conforms to `src/schema-parser/schemaParser.ts` and wire it into `Seeder`.
 
 ## Quick Start
 
