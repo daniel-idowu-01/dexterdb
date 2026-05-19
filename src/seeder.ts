@@ -43,6 +43,7 @@ export class Seeder {
   private mongooseModels: Map<string, any> = new Map();
   private prismaClient: any;
   private dbType: "mongodb" | "postgresql";
+  private usedUniqueRefs: Map<string, Set<any>> = new Map();
 
   constructor(options: SeederOptions) {
     this.options = options;
@@ -182,6 +183,9 @@ export class Seeder {
     config: ModelConfig
   ): Promise<any[]> {
     const data: any[] = [];
+    
+    // Reset unique ref tracking for this model seeding
+    this.usedUniqueRefs.clear();
 
     for (let i = 0; i < count; i++) {
       const record: any = {};
@@ -194,7 +198,7 @@ export class Seeder {
         const fieldConfig = config.fields?.[field.name];
 
         if (field.isForeignKey && field.relationModel) {
-          const refValue = await this.resolveReference(field, model.name);
+          const refValue = await this.resolveReference(field, model.name, field.isUnique);
 
           if (refValue !== null && refValue !== undefined) {
             // Check if it's a many-to-many or one-to-many with array
@@ -208,7 +212,7 @@ export class Seeder {
 
               const refs = [];
               for (let j = 0; j < refCount; j++) {
-                const ref = await this.resolveReference(field, model.name);
+                const ref = await this.resolveReference(field, model.name, false);
                 if (ref) refs.push(ref);
               }
               record[field.name] = refs;
@@ -307,17 +311,35 @@ export class Seeder {
     }
   }
 
-  private async resolveReference(field: SchemaField, currentModel: string): Promise<any> {
+  private async resolveReference(field: SchemaField, currentModel: string, isUnique: boolean = false): Promise<any> {
     if (!field.relationModel) {
       return null;
     }
 
+    const refKey = `${currentModel}.${field.name}`;
+    if (!this.usedUniqueRefs.has(refKey)) {
+      this.usedUniqueRefs.set(refKey, new Set());
+    }
+    const usedSet = this.usedUniqueRefs.get(refKey)!;
+
     const relatedData = this.generatedData.get(field.relationModel);
     if (relatedData && relatedData.length > 0) {
-      const randomRecord = _.sample(relatedData);
-      if (randomRecord) {
-        const key = field.relationField || this.getPrimaryKeyField(field.relationModel) || "id";
-        return randomRecord[key] ?? randomRecord._id;
+      const key = field.relationField || this.getPrimaryKeyField(field.relationModel) || "id";
+      
+      if (isUnique) {
+        // For unique FK constraints, find an unused related ID
+        const availableRecords = relatedData.filter((r: any) => !usedSet.has(r[key] ?? r._id));
+        if (availableRecords.length > 0) {
+          const randomRecord = _.sample(availableRecords)!;
+          const value = randomRecord[key] ?? randomRecord._id;
+          usedSet.add(value);
+          return value;
+        }
+      } else {
+        const randomRecord = _.sample(relatedData);
+        if (randomRecord) {
+          return randomRecord[key] ?? randomRecord._id;
+        }
       }
     }
 
@@ -329,8 +351,17 @@ export class Seeder {
           const records = await relatedModel.find().limit(100).select("_id").lean();
 
           if (records.length > 0) {
-            const randomRecord = _.sample(records);
-            return randomRecord?._id;
+            if (isUnique) {
+              const availableRecords = records.filter((r: any) => !usedSet.has(r._id));
+              if (availableRecords.length > 0) {
+                const randomRecord = _.sample(availableRecords)!;
+                usedSet.add(randomRecord._id);
+                return randomRecord._id;
+              }
+            } else {
+              const randomRecord = _.sample(records);
+              return randomRecord?._id;
+            }
           }
         }
       } else {
@@ -344,8 +375,17 @@ export class Seeder {
           });
 
           if (records.length > 0) {
-            const randomRecord = _.sample(records);
-            return randomRecord ? randomRecord[selectField] : null;
+            if (isUnique) {
+              const availableRecords = records.filter((r: any) => !usedSet.has(r[selectField]));
+              if (availableRecords.length > 0) {
+                const randomRecord = _.sample(availableRecords)!;
+                usedSet.add(randomRecord[selectField]);
+                return randomRecord[selectField];
+              }
+            } else {
+              const randomRecord = _.sample(records);
+              return randomRecord ? randomRecord[selectField] : null;
+            }
           }
         }
       }

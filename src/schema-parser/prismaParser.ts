@@ -187,33 +187,26 @@ export class PrismaParser {
       let relationField: string | undefined;
 
       if (isForeignKey) {
-        const relationLineMatch = modelBody.match(
-          new RegExp(`(\\w+)\\s+(\\w+)\\s+@relation\\([^)]*fields:\s*\\[${fieldName}\\][^)]*\\)`, 'g')
+        // Find the @relation that references this field and extract both model and target field
+        const fkRelationRegex = new RegExp(
+          `(\\w+)\\s+(\\w+)\\s+@relation\\([^)]*fields:\\s*\\[${fieldName}\\][^)]*references:\\s*\\[([^\\]]+)\\][^)]*\\)`,
+          'g'
         );
-        if (relationLineMatch && relationLineMatch.length > 0) {
-          const parts = relationLineMatch[0].match(/(\w+)\s+(\w+)/);
-          if (parts && parts[2]) {
-            const potentialModel = parts[2];
-            if (!scalarTypes.has(potentialModel)) {
-              relationModel = potentialModel;
-            }
+        const fkMatch = fkRelationRegex.exec(modelBody);
+        
+        if (fkMatch) {
+          // fkMatch[2] is the model type, fkMatch[3] is the reference field
+          const potentialModel = fkMatch[2];
+          if (!scalarTypes.has(potentialModel)) {
+            relationModel = potentialModel;
+            relationField = fkMatch[3].trim();
           }
         }
       }
 
       const relationMatch = attributes.match(/@relation\([^)]*fields:\s*\[([^\]]+)\][^)]*references:\s*\[([^\]]+)\][^)]*\)/);
-      if (relationMatch) {
+      if (relationMatch && !relationField) {
         relationField = relationMatch[2].trim();
-        const relationLineMatch = modelBody.match(new RegExp(`(\\w+)\\s+(\\w+)\\s+@relation\\([^)]*fields:\s*\\[${fieldName}\\][^)]*\\)`, 'g'));
-        if (relationLineMatch) {
-          const parts = relationLineMatch[0].match(/(\w+)\s+(\w+)/);
-          if (parts && parts[2]) {
-            const potentialModel = parts[2];
-            if (!scalarTypes.has(potentialModel)) {
-              relationModel = potentialModel;
-            }
-          }
-        }
       }
 
       const enumValues = this.enums[fieldTypeBase];

@@ -90,6 +90,34 @@ model Profile {
     expect(userModel?.fields.map((f) => f.name)).toEqual(["id", "email"]);
   });
 
+  it("extracts foreign key relationModel and relationField for scalar FK fields", async () => {
+    const schema = `
+model User {
+  id    Int    @id @default(autoincrement())
+  email String @unique
+  posts Post[]
+}
+
+model Post {
+  id       Int    @id @default(autoincrement())
+  title    String
+  authorId Int
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+}
+`;
+
+    writeFileSync(schemaPath, schema);
+    const parser = new PrismaParser(schemaPath, "postgresql://user:pass@localhost:5432/test");
+    const models = await parser.parseSchema();
+    const postModel = models.find((m) => m.name === "Post");
+    const authorIdField = postModel?.fields.find((f) => f.name === "authorId");
+
+    expect(authorIdField).toBeDefined();
+    expect(authorIdField?.isForeignKey).toBe(true);
+    expect(authorIdField?.relationModel).toBe("User");
+    expect(authorIdField?.relationField).toBe("id");
+  });
+
   it("connects and disconnects with Prisma client", async () => {
     const schema = `model Test { id Int @id @default(autoincrement()) }`;
     writeFileSync(schemaPath, schema);
