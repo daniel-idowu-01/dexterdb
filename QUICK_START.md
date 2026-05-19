@@ -5,7 +5,7 @@
 ### 1. Start Database (Docker)
 
 ```bash
-# Start PostgreSQL in Docker
+# Start PostgreSQL and MongoDB services in Docker
 npm run db:up
 
 # Or manually:

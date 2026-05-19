@@ -1,4 +1,6 @@
 import { MongooseParser } from "./schema-parser/mongooseParser";
+import { PrismaParser } from "./schema-parser/prismaParser";
+import { SchemaParser } from "./schema-parser/schemaParser";
 import {
   StringGenerator,
   NumberGenerator,
@@ -34,16 +36,25 @@ function clampSeedCount(count: number): number {
 
 export class Seeder {
   private options: SeederOptions;
-  private parser: MongooseParser;
+  private parser: SchemaParser;
   private config: SeederConfig;
   private models: SchemaModel[] = [];
   private generatedData: Map<string, any[]> = new Map();
   private mongooseModels: Map<string, any> = new Map();
+  private prismaClient: any;
+  private dbType: "mongodb" | "postgresql";
+  private usedUniqueRefs: Map<string, Set<any>> = new Map();
 
   constructor(options: SeederOptions) {
     this.options = options;
+    this.dbType = options.dbType || this.detectDbType(options.dbUrl);
 
-    this.parser = new MongooseParser(options.schemaPath, options.dbUrl);
+    if (this.dbType === "mongodb") {
+      this.parser = new MongooseParser(options.schemaPath, options.dbUrl);
+    } else {
+      this.parser = new PrismaParser(options.schemaPath, options.dbUrl);
+    }
+
     this.config = ConfigLoader.mergeWithDefaults(ConfigLoader.load(options.configPath));
   }
 
@@ -54,13 +65,19 @@ export class Seeder {
       await this.parser.connect();
 
       this.models = await this.parser.introspectDatabase();
-      this.mongooseModels = this.parser.getModels();
-
       Logger.success(`Found ${this.models.length} models in schema`);
 
-      const connection = this.parser.getConnection();
-      if (connection.connection.readyState !== 1) {
-        throw new Error("MongoDB connection not ready");
+      if (this.dbType === "mongodb") {
+        this.mongooseModels = this.parser.getModels?.() ?? new Map();
+        const connection = this.parser.getConnection?.();
+        if (!connection || connection.connection.readyState !== 1) {
+          throw new Error("MongoDB connection not ready");
+        }
+      } else {
+        this.prismaClient = this.parser.getPrismaClient?.();
+        if (!this.prismaClient) {
+          throw new Error("Prisma client not initialized");
+        }
       }
     } catch (error: any) {
       Logger.error(`Failed to initialize seeder: ${error.message}`);
@@ -77,20 +94,17 @@ export class Seeder {
     try {
       Logger.step(`Seeding ${modelName} with ${count} records...`);
 
-      const connection = this.parser.getConnection();
-      if (connection.connection.readyState !== 1) {
-        Logger.warning("Connection not ready, attempting to reconnect...");
-        await this.parser.connect();
+      if (this.dbType === "mongodb") {
+        const connection = this.parser.getConnection?.();
+        if (!connection || connection.connection.readyState !== 1) {
+          Logger.warning("Connection not ready, attempting to reconnect...");
+          await this.parser.connect();
+        }
       }
 
-      const model = this.models.find(m => m.name === modelName);
+      const model = this.models.find((m) => m.name === modelName);
       if (!model) {
         throw new Error(`Model ${modelName} not found in schema`);
-      }
-
-      const mongooseModel = this.mongooseModels.get(modelName);
-      if (!mongooseModel) {
-        throw new Error(`Mongoose model ${modelName} not loaded`);
       }
 
       const modelConfig: any = {
@@ -99,15 +113,35 @@ export class Seeder {
       };
 
       if (modelConfig.reset || this.config.global?.reset) {
-        Logger.warning(`Resetting ${modelName} collection...`);
-        await mongooseModel.deleteMany({});
+        const action = this.dbType === "mongodb" ? "collection" : "table";
+        Logger.warning(`Resetting ${modelName} ${action}...`);
+        if (this.dbType === "mongodb") {
+          const mongooseModel = this.mongooseModels.get(modelName);
+          if (!mongooseModel) {
+            throw new Error(`Mongoose model ${modelName} not loaded`);
+          }
+          await mongooseModel.deleteMany({});
+        } else {
+          const prismaModel = this.getPrismaDelegate(modelName);
+          await prismaModel.deleteMany({});
+        }
       }
 
       const data = await this.generateModelData(model, count, modelConfig);
+      let result;
 
-      const result = await this.insertData(modelName, mongooseModel, data);
+      if (this.dbType === "mongodb") {
+        const mongooseModel = this.mongooseModels.get(modelName);
+        if (!mongooseModel) {
+          throw new Error(`Mongoose model ${modelName} not loaded`);
+        }
+        result = await this.insertData(modelName, mongooseModel, data);
+      } else {
+        const prismaModel = this.getPrismaDelegate(modelName);
+        result = await this.insertData(modelName, prismaModel, data);
+      }
 
-      const insertedRecords = await this.fetchInsertedRecords(mongooseModel, result.count);
+      const insertedRecords = result.records ?? await this.fetchInsertedRecords(modelName, result.count);
       this.generatedData.set(modelName, insertedRecords);
 
       Logger.success(`Successfully seeded ${result.count} ${modelName} records`);
@@ -118,18 +152,22 @@ export class Seeder {
       };
     } catch (error: any) {
       Logger.error(`Failed to seed ${modelName}: ${error.message}`);
-      
-      if (error.message.includes("buffering timed out")) {
+
+      if (error.message.includes("buffering timed out") && this.dbType === "mongodb") {
         Logger.error("Connection timeout detected. Possible causes:");
         Logger.error("1. MongoDB server is not running");
         Logger.error("2. DATABASE_URL is incorrect");
         Logger.error("3. Network/firewall issues");
         Logger.error("4. Model not properly connected to database");
-        
-        const connection = this.parser.getConnection();
-        Logger.error(`Connection state: ${connection.connection.readyState} (1=connected, 0=disconnected)`);
+
+        const connection = (this.parser as MongooseParser).getConnection?.();
+        if (connection) {
+          Logger.error(
+            `Connection state: ${connection.connection.readyState} (1=connected, 0=disconnected)`
+          );
+        }
       }
-      
+
       return {
         model: modelName,
         count: 0,
@@ -145,6 +183,9 @@ export class Seeder {
     config: ModelConfig
   ): Promise<any[]> {
     const data: any[] = [];
+    
+    // Reset unique ref tracking for this model seeding
+    this.usedUniqueRefs.clear();
 
     for (let i = 0; i < count; i++) {
       const record: any = {};
@@ -157,7 +198,7 @@ export class Seeder {
         const fieldConfig = config.fields?.[field.name];
 
         if (field.isForeignKey && field.relationModel) {
-          const refValue = await this.resolveReference(field, model.name);
+          const refValue = await this.resolveReference(field, model.name, field.isUnique);
 
           if (refValue !== null && refValue !== undefined) {
             // Check if it's a many-to-many or one-to-many with array
@@ -171,7 +212,7 @@ export class Seeder {
 
               const refs = [];
               for (let j = 0; j < refCount; j++) {
-                const ref = await this.resolveReference(field, model.name);
+                const ref = await this.resolveReference(field, model.name, false);
                 if (ref) refs.push(ref);
               }
               record[field.name] = refs;
@@ -270,28 +311,82 @@ export class Seeder {
     }
   }
 
-  private async resolveReference(field: SchemaField, currentModel: string): Promise<any> {
+  private async resolveReference(field: SchemaField, currentModel: string, isUnique: boolean = false): Promise<any> {
     if (!field.relationModel) {
       return null;
     }
 
+    const refKey = `${currentModel}.${field.name}`;
+    if (!this.usedUniqueRefs.has(refKey)) {
+      this.usedUniqueRefs.set(refKey, new Set());
+    }
+    const usedSet = this.usedUniqueRefs.get(refKey)!;
+
     const relatedData = this.generatedData.get(field.relationModel);
     if (relatedData && relatedData.length > 0) {
-      const randomRecord = _.sample(relatedData);
-      if (randomRecord && randomRecord._id) {
-        return randomRecord._id;
+      const key = field.relationField || this.getPrimaryKeyField(field.relationModel) || "id";
+      
+      if (isUnique) {
+        // For unique FK constraints, find an unused related ID
+        const availableRecords = relatedData.filter((r: any) => !usedSet.has(r[key] ?? r._id));
+        if (availableRecords.length > 0) {
+          const randomRecord = _.sample(availableRecords)!;
+          const value = randomRecord[key] ?? randomRecord._id;
+          usedSet.add(value);
+          return value;
+        }
+      } else {
+        const randomRecord = _.sample(relatedData);
+        if (randomRecord) {
+          return randomRecord[key] ?? randomRecord._id;
+        }
       }
     }
 
     try {
-      const relatedModel = this.mongooseModels.get(field.relationModel);
+      if (this.dbType === "mongodb") {
+        const relatedModel = this.mongooseModels.get(field.relationModel);
 
-      if (relatedModel) {
-        const records = await relatedModel.find().limit(100).select("_id").lean();
+        if (relatedModel) {
+          const records = await relatedModel.find().limit(100).select("_id").lean();
 
-        if (records.length > 0) {
-          const randomRecord = _.sample(records);
-          return randomRecord?._id;
+          if (records.length > 0) {
+            if (isUnique) {
+              const availableRecords = records.filter((r: any) => !usedSet.has(r._id));
+              if (availableRecords.length > 0) {
+                const randomRecord = _.sample(availableRecords)!;
+                usedSet.add(randomRecord._id);
+                return randomRecord._id;
+              }
+            } else {
+              const randomRecord = _.sample(records);
+              return randomRecord?._id;
+            }
+          }
+        }
+      } else {
+        const relatedModel = this.getPrismaDelegate(field.relationModel);
+        const selectField = field.relationField || this.getPrimaryKeyField(field.relationModel) || "id";
+
+        if (relatedModel) {
+          const records = await relatedModel.findMany({
+            take: 100,
+            select: { [selectField]: true },
+          });
+
+          if (records.length > 0) {
+            if (isUnique) {
+              const availableRecords = records.filter((r: any) => !usedSet.has(r[selectField]));
+              if (availableRecords.length > 0) {
+                const randomRecord = _.sample(availableRecords)!;
+                usedSet.add(randomRecord[selectField]);
+                return randomRecord[selectField];
+              }
+            } else {
+              const randomRecord = _.sample(records);
+              return randomRecord ? randomRecord[selectField] : null;
+            }
+          }
         }
       }
     } catch (error) {
@@ -315,10 +410,10 @@ export class Seeder {
 
   private async insertData(
     modelName: string,
-    mongooseModel: any,
+    model: any,
     data: any[]
-  ): Promise<{ count: number }> {
-    const cleanData = data.map(record => {
+  ): Promise<{ count: number; records?: any[] }> {
+    const cleanData = data.map((record) => {
       const clean: any = {};
       for (const [key, value] of Object.entries(record)) {
         if (value !== undefined) {
@@ -329,35 +424,111 @@ export class Seeder {
     });
 
     try {
-      if (this.config.global?.randomize) {
-        const shuffled = _.shuffle(cleanData);
-        const results = [];
-        for (const record of shuffled) {
-          const doc = new mongooseModel(record);
-          const saved = await doc.save();
-          results.push(saved);
+      if (this.dbType === "mongodb") {
+        if (this.config.global?.randomize) {
+          const shuffled = _.shuffle(cleanData);
+          const results = [];
+          for (const record of shuffled) {
+            const doc = new model(record);
+            const saved = await doc.save();
+            results.push(saved);
+          }
+          return { count: results.length, records: results };
         }
-        return { count: results.length };
-      } else {
-        const results = await mongooseModel.insertMany(cleanData, {
+
+        const results = await model.insertMany(cleanData, {
           ordered: false, // Continue on error
         });
-        return { count: results.length };
+        return { count: results.length, records: results };
       }
+
+      // Prisma / PostgreSQL path
+      const insertedRecords: any[] = [];
+      const writeData = this.config.global?.randomize ? _.shuffle(cleanData) : cleanData;
+      for (const record of writeData) {
+        const created = await model.create({ data: record });
+        insertedRecords.push(created);
+      }
+      return { count: insertedRecords.length, records: insertedRecords };
     } catch (error: any) {
       Logger.error(`Insert error: ${error.message}`);
       throw error;
     }
   }
 
-  private async fetchInsertedRecords(mongooseModel: any, count: number): Promise<any[]> {
+  private async fetchInsertedRecords(modelName: string, count: number): Promise<any[]> {
+    if (this.dbType === "mongodb") {
+      try {
+        const mongooseModel = this.mongooseModels.get(modelName);
+        if (!mongooseModel) {
+          return [];
+        }
+        const records = await mongooseModel.find().sort({ _id: -1 }).limit(count).lean();
+        return records;
+      } catch (error) {
+        Logger.debug(`Could not fetch inserted records: ${error}`);
+        return [];
+      }
+    }
+
     try {
-      const records = await mongooseModel.find().sort({ _id: -1 }).limit(count).lean();
+      const prismaModel = this.getPrismaDelegate(modelName);
+      const sortField = this.getSortField(modelName);
+      const records = await prismaModel.findMany({
+        take: count,
+        orderBy: { [sortField]: "desc" },
+      });
       return records;
     } catch (error) {
       Logger.debug(`Could not fetch inserted records: ${error}`);
       return [];
     }
+  }
+
+  private detectDbType(dbUrl: string): "mongodb" | "postgresql" {
+    const normalized = dbUrl.toLowerCase();
+    if (normalized.startsWith("mongodb://") || normalized.startsWith("mongodb+srv://")) {
+      return "mongodb";
+    }
+    if (normalized.startsWith("postgresql://") || normalized.startsWith("postgres://")) {
+      return "postgresql";
+    }
+    throw new Error("Unsupported DATABASE_URL scheme. Supported: mongodb://, mongodb+srv://, postgres://, postgresql://");
+  }
+
+  private getPrismaDelegate(modelName: string): any {
+    if (!this.prismaClient) {
+      throw new Error("Prisma client not initialized");
+    }
+
+    const modelKey = Object.keys(this.prismaClient).find((key) => {
+      return key.toLowerCase() === modelName.toLowerCase() || key === `${modelName[0].toLowerCase()}${modelName.slice(1)}`;
+    });
+
+    if (!modelKey) {
+      throw new Error(`Prisma delegate for model ${modelName} not found`);
+    }
+
+    return this.prismaClient[modelKey];
+  }
+
+  private getPrimaryKeyField(modelName: string): string | undefined {
+    const model = this.models.find((m) => m.name === modelName);
+    return model?.fields.find((field) => field.isPrimaryKey)?.name;
+  }
+
+  private getSortField(modelName: string): string {
+    const model = this.models.find((m) => m.name === modelName);
+    if (!model) {
+      return "id";
+    }
+
+    const createdAtField = model.fields.find((field) => field.name.toLowerCase() === "createdat");
+    if (createdAtField) {
+      return createdAtField.name;
+    }
+
+    return this.getPrimaryKeyField(modelName) || model.fields[0]?.name || "id";
   }
 
   async seedAll(): Promise<SeedResult[]> {

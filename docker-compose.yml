@@ -16,5 +16,23 @@ services:
       timeout: 5s
       retries: 5
 
+  postgresql:
+    image: postgres:15
+    container_name: dexter-postgresql
+    environment:
+      POSTGRES_USER: ${PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_PASS:-postgres}
+      POSTGRES_DB: ${PG_DB:-dexter_test}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   mongodb_data:
+  postgres_data:

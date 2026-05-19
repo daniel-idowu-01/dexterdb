@@ -1,6 +1,6 @@
-# Dexter DB Seeder - MongoDB Edition
+# Dexter DB Seeder - MongoDB + PostgreSQL
 
-A powerful TypeScript Node.js library and CLI tool for automatically generating realistic test data for MongoDB databases using **Mongoose ODM**.
+A powerful TypeScript Node.js library and CLI tool for automatically generating realistic test data for MongoDB and PostgreSQL databases.
 
 ## Key Features
 
@@ -12,11 +12,74 @@ A powerful TypeScript Node.js library and CLI tool for automatically generating 
 - **Dependency-Aware Seeding** - Automatically determines correct seeding order
 - **Type-Aware Generators** - Detects field patterns (OTP, email, phone, etc.)
 
+## How It Works (Overview)
+
+- Detection: the seeder auto-detects the backend from `DATABASE_URL` (MongoDB vs PostgreSQL). You can override it by passing `dbType` to the `Seeder` constructor.
+- MongoDB path: uses the `MongooseParser` to load Mongoose models from `src/models/`, introspect schema fields and relations, then seeds via Mongoose model APIs.
+- PostgreSQL path: uses the `PrismaParser` to parse `prisma/schema.prisma`, extract models/fields/relations, and inserts via the generated `@prisma/client` delegates.
+- Relationship handling: the seeder orders models by dependency, resolves foreign keys from already-seeded parents (or from the live database), and ensures unique FK constraints are respected.
+
+This design keeps data generation logic database-agnostic while delegating model parsing and write semantics to a database-specific parser (Mongoose or Prisma).
+
 ## Prerequisites
 
 - Node.js >= 18.0.0
-- MongoDB database (local or cloud like MongoDB Atlas)
-- Mongoose models defined in TypeScript/JavaScript
+- MongoDB database (local or cloud like MongoDB Atlas) or PostgreSQL database via Prisma
+- Mongoose models defined in TypeScript/JavaScript for MongoDB
+- Prisma schema and generated `@prisma/client` for PostgreSQL
+
+## For Developers & Contributors
+
+If you want to contribute or work on Dexter locally, follow these steps.
+
+1. Clone and install
+
+```bash
+git clone https://github.com/daniel-idowu-01/dexterdb.git
+cd dexterdb
+npm install
+```
+
+2. Environment
+
+Create a `.env` with a `DATABASE_URL` for the backend you are using (MongoDB or PostgreSQL).
+
+3. Start local databases (optional — Docker)
+
+```bash
+npm run db:up
+```
+
+4. Prisma setup (PostgreSQL only)
+
+```bash
+npm run prisma:generate
+npm run prisma:push
+```
+
+5. Build & run tests
+
+```bash
+npm run build
+npm test
+```
+
+6. Development (fast iteration)
+
+Use `ts-node` during development to run the CLI or test scripts without building:
+
+```bash
+npx ts-node cli.ts seed --model User --count 10 --schema prisma/schema.prisma
+```
+
+7. Contributing guidelines
+
+- Add unit tests for new parsers, generators, or features under `tests/`.
+- Keep changes narrowly scoped and add regression tests for parser edge cases (relations, enums, defaults).
+- Run `npm run format` before committing.
+- Open a pull request with a clear description of the change and testing steps.
+
+If you plan to add support for another database backend, implement a new `SchemaParser` that conforms to `src/schema-parser/schemaParser.ts` and wire it into `Seeder`.
 
 ## Quick Start
 
@@ -27,8 +90,9 @@ npm install dexterdb mongoose
 # or
 yarn add dexterdb mongoose
 
-# dev dependencies
-npm install -D typescript @types/node ts-node
+# PostgreSQL + Prisma support
+npm install dexterdb @prisma/client
+npm install -D prisma typescript @types/node ts-node
 ```
 
 ### 2. Setup MongoDB Connection
@@ -44,6 +108,21 @@ DATABASE_URL="mongodb://<username>:<password>@localhost:27017/mydb?authSource=ad
 
 # MongoDB Atlas (Cloud)
 DATABASE_URL="mongodb+srv://<username>:<password>@<cluster-url>/mydb?retryWrites=true&w=majority"
+```
+
+### 2.b Setup PostgreSQL Connection (Prisma)
+
+Create a `.env` file with a PostgreSQL URL and point to a Prisma schema file when needed:
+
+```env
+DATABASE_URL="postgresql://postgres:your_password@localhost:5432/dexter_test?schema=public"
+```
+
+Make sure you have a valid `prisma/schema.prisma` file and run:
+
+```bash
+npx prisma generate
+npx prisma db push
 ```
 
 ### 3. Create Mongoose Models
@@ -133,10 +212,13 @@ npm run build
 
 npx dexterdb seed --model User --count 50
 
+# PostgreSQL (Prisma schema)
+npx dexterdb seed --model User --count 50 --schema prisma/schema.prisma
+
 # Seed all models (automatic dependency ordering)
 npx dexterdb seed
 
-# Reset collection before seeding
+# Reset collection/table before seeding
 npx dexterdb seed --model User --count 50 --reset
 
 # List available models
@@ -144,7 +226,7 @@ npx dexterdb list
 
 # Using ts-node for development
 npx ts-node cli.ts seed --model User --count 50
-```
+``` 
 
 ## Docker
 

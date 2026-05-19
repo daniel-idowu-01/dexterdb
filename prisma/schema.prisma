@@ -25,8 +25,8 @@ model Profile {
   bio       String?
   avatar    String?
   userId    Int      @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Post {
@@ -35,8 +35,7 @@ model Post {
   content   String?
   published Boolean  @default(false)
   authorId  Int
-  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
 }
-

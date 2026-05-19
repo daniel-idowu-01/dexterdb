@@ -3,6 +3,7 @@ export interface SeederOptions {
   schemaPath?: string;
   configPath?: string;
   verbose?: boolean;
+  dbType?: "mongodb" | "postgresql";
 }
 
 export interface FieldConfig {
